@@ -1,0 +1,48 @@
+#+title: Subscribe
+
+Web application to manage Mailgun mailing list subscriptions.
+
+#+html: <img src="subscribe.webp" />
+
+* Install and run
+
+Assuming [[https://github.com/babashka/bbin][bbin]] is installed:
+
+#+begin_src sh
+bbin install https://raw.githubusercontent.com/bzg/subscribe/refs/heads/main/subscribe.clj
+#+end_src
+
+Then run:
+
+#+begin_src sh
+subscribe
+# Then check http://localhost:8080
+#+end_src
+
+* Feedback
+
+To get or provide feedback, send an email to *bzg@bzg.fr*.
+
+* Requirements
+
+=subscribe= is written as a [[https://clojure.org][Clojure]] [[https://babashka.org][Babashka]] script and we recommend
+installing it with [[https://github.com/babashka/bbin][bbin]]. Install everything:
+
+#+begin_src sh
+brew install babashka/brew/bbin
+#+end_src
+
+For detailed installation instructions:
+
+- [[https://clojure.org/guides/install_clojure][Install Clojure]]
+- [[https://github.com/babashka/babashka#installation][Install babashka]]
+- [[https://github.com/babashka/bbin#installation][Install bbin]]
+
+* Support the Clojure(script) ecosystem
+
+If you like Clojure(script), you can support the ecosystem by making a
+donation to [[https://www.clojuriststogether.org][clojuriststogether.org]].
+
+* License
+
+The code in this repository is licensed under [[LICENSES/EPL-2.0.txt][EPL-2.0]].
