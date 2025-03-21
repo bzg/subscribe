@@ -65,7 +65,7 @@
          '[clojure.spec.alpha :as s]
          '[babashka.deps :as deps])
 
-(def version "0.5.1")
+(def version "0.5.2")
 
 (deps/add-deps '{:deps {org.clojars.askonomm/ruuter {:mvn/version "1.3.4"}}})
 (pods/load-pod 'tzzh/mail "0.0.3")
@@ -221,8 +221,11 @@
         query-string (when (seq query-params)
                        (str/join "&"
                                  (map (fn [[k v]]
-                                        (str (name k) "="
-                                             (java.net.URLEncoder/encode (str v) "UTF-8")))
+                                        ;; Special handling for token to avoid double-encoding
+                                        (if (= k :token)
+                                          (str (name k) "=" v)
+                                          (str (name k) "="
+                                               (java.net.URLEncoder/encode (str v) "UTF-8"))))
                                       query-params)))]
     (if (seq query-string)
       (str url "?" query-string)
@@ -769,23 +772,24 @@
   (when file-path
     (log/info "Using configuration file:" file-path)
     (when-let [config-data (read-config-file file-path)]
-      (when (validate-config config-data)
-        ;; Merge UI strings first to handle the nested structure
-        (merge-ui-strings! config-data)
-        ;; Handle path normalization for specific fields
-        (let [processed-config
-              (cond-> (dissoc config-data :ui-strings)
-                ;; Process base-path if present
-                (:base-path config-data)
-                (update :base-path normalize-path)
-                ;; Process base-url if present
-                (:base-url config-data)
-                (update :base-url normalize-url))]
-          ;; Log what we're updating
-          (doseq [k (keys processed-config)]
-            (log/info "Updating config:" k))
-          ;; Update the config with the processed values
-          (swap! app-config merge processed-config))))))
+      (if-not (validate-config config-data)
+        (System/exit 0)
+        (do ;; Merge UI strings first to handle the nested structure
+          (merge-ui-strings! config-data)
+          ;; Handle path normalization for specific fields
+          (let [processed-config
+                (cond-> (dissoc config-data :ui-strings)
+                  ;; Process base-path if present
+                  (:base-path config-data)
+                  (update :base-path normalize-path)
+                  ;; Process base-url if present
+                  (:base-url config-data)
+                  (update :base-url normalize-url))]
+            ;; Log what we're updating
+            (doseq [k (keys processed-config)]
+              (log/info "Updating config:" k))
+            ;; Update the config with the processed values
+            (swap! app-config merge processed-config)))))))
 
 (defn determine-language [req]
   (let [accept-language (get-in req [:headers "accept-language"] "")]
@@ -1375,7 +1379,9 @@
       (log/info "SUBSCRIBE_BASE_PATH=" (config :base-path)))
     (if (not-empty (config :mailgun-api-key))
       (log/info "MAILGUN_API_KEY=****")
-      (log/error "MAILGUN_API_KEY not set"))
+      (do
+        (log/error "MAILGUN_API_KEY not set")
+        (System/exit 0)))
     ;; Log SMTP configuration
     (if (and (config :subscribe-smtp-host)
              (config :subscribe-smtp-port)
@@ -1388,7 +1394,7 @@
         (log/info "SUBSCRIBE_SMTP_USER=" (config :subscribe-smtp-user))
         (log/info "SUBSCRIBE_SMTP_PASS=****")
         (log/info "SUBSCRIBE_SMTP_FROM=" (config :subscribe-smtp-from)))
-      (log/warn "SMTP configuration incomplete."))
+      (do (log/error "SMTP configuration incomplete.")))
     (if (config :base-url)
       (log/info "SUBSCRIBE_BASE_URL=" (config :base-url))
       (log/warn "SUBSCRIBE_BASE_URL not set, use http://localhost"))
