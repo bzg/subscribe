@@ -1302,8 +1302,8 @@
       (catch Throwable e
         (handle-error req e (str "URI: " uri))))))
 
-(defn -main []
-  (let [opts (cli/parse-opts *command-line-args* {:spec cli-options})
+(defn -main [& args]
+  (let [opts (cli/parse-opts args {:spec cli-options})
         port (get opts :port 8080)]
     ;; Handle help and version option
     (when (:help opts) (print-usage))
@@ -1365,4 +1365,4 @@
 
 ;; Main entry point
 (when (= *file* (System/getProperty "babashka.file"))
-  (-main))
+  (apply -main *command-line-args*))
