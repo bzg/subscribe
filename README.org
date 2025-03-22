@@ -9,7 +9,7 @@ Web application to manage Mailgun mailing list subscriptions.
 Assuming [[https://github.com/babashka/bbin][bbin]] is installed:
 
 #+begin_src sh
-bbin install https://raw.githubusercontent.com/bzg/subscribe/refs/heads/main/subscribe.clj
+bbin install io.github.bzg/subscribe
 #+end_src
 
 Then run:
