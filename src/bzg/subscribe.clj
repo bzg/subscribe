@@ -66,7 +66,7 @@
             [clojure.spec.alpha :as s]
             [babashka.deps :as deps]))
 
-(def version "0.5.4")
+(def version "0.6")
 
 (deps/add-deps '{:deps {org.clojars.askonomm/ruuter {:mvn/version "1.3.4"}}})
 (pods/load-pod 'tzzh/mail "0.0.3")
@@ -309,7 +309,8 @@
    {:page
     {:title      "Mailing list subscription"
      :heading    "Subscribe to our mailing list"
-     :subheading "Join our mailing list to receive updates and news"}
+     :subheading "Join our mailing list to receive updates and news"
+     :footer     "Made with <a target=\"new\" href=\"https://github.com/bzg/subscribe\">subscribe</a>"}
     :form
     {:email-placeholder  "you@example.com"
      :website-label      "Website (leave this empty)"
@@ -360,7 +361,8 @@
    {:page
     {:title      "Abonnement par e-mail"
      :heading    "Abonnement à notre liste de diffusion"
-     :subheading "Rejoignez notre liste pour recevoir des nouvelles"}
+     :subheading "Rejoignez notre liste pour recevoir des nouvelles"
+     :footer     "Fait avec <a target=\"new\" href=\"https://github.com/bzg/subscribe\">subscribe</a>"}
     :form
     {:email-placeholder  "vous@exemple.com"
      :website-label      "Site web (laissez ce champ vide)"
@@ -589,6 +591,22 @@
 ;; Configure Selmer HTML escape handling
 (filters/add-filter! :safe-str (fn [x] [:safe x]))
 
+(def css-style
+  ".container {max-width: 800px; padding: 2rem 1rem; margin: 0 auto;}
+@media (max-width: 768px) {.container {width: 100%; padding: 1rem;}}
+.success {border-left: 5px solid var(--pico-color-green-550);}
+.error {border-left: 5px solid var(--pico-color-red-550);}
+.warning {border-left: 5px solid var(--pico-color-yellow-550);}
+.info {border-left: 5px solid var(--pico-color-blue-550);}
+.debug {margin-top: 1rem; padding: 1rem; background-color: var(--pico-background-muted); border-radius: var(--pico-border-radius); white-space: pre-wrap; display: none; font-size: 0.85rem;}
+.htmx-indicator {opacity: 0; transition: opacity 200ms ease-in;}
+.htmx-request .htmx-indicator {opacity: 1;}
+button.primary {background-color: var(--pico-primary-background); color: var(--pico-primary-inverse);}
+button.secondary {background-color: var(--pico-secondary-background); color: var(--pico-secondary-inverse);}
+.visually-hidden {position: absolute;left: -9999px; height: 1px; width: 1px; overflow: hidden;}
+.card {padding: 2rem; margin-bottom: 1rem;}
+.footer {text-align: center;font-size: .8rem;}")
+
 ;; Selmer Templates
 (def index-template
   "<!DOCTYPE html>
@@ -601,84 +619,18 @@
   <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\">
   <script src=\"https://unpkg.com/htmx.org@2.0.0\"></script>
   <style>
-    /* Additional custom styles */
-    .container {
-      max-width: 800px;
-      padding: 2rem 1rem;
-      margin: 0 auto;
-    }
-    /* Responsive adjustments */
-    @media (max-width: 768px) {
-      .container {
-        width: 100%;
-        padding: 1rem;
-      }
-    }
-    .card {
-      padding: 2rem;
-      margin-bottom: 1rem;
-    }
-    .success {
-      border-left: 5px solid var(--pico-color-green-550);
-    }
-    .error {
-      border-left: 5px solid var(--pico-color-red-550);
-    }
-    .warning {
-      border-left: 5px solid var(--pico-color-yellow-550);
-    }
-    .info {
-      border-left: 5px solid var(--pico-color-blue-550);
-    }
-    .debug {
-      margin-top: 1rem;
-      padding: 1rem;
-      background-color: var(--pico-background-muted);
-      border-radius: var(--pico-border-radius);
-      white-space: pre-wrap;
-      display: none;
-      font-size: 0.85rem;
-    }
-    .htmx-indicator {
-      opacity: 0;
-      transition: opacity 200ms ease-in;
-    }
-    .htmx-request .htmx-indicator {
-      opacity: 1;
-    }
-    .htmx-request.htmx-indicator {
-      opacity: 1;
-    }
-    /* Button styles */
-    button.primary {
-      background-color: var(--pico-primary-background);
-      color: var(--pico-primary-inverse);
-    }
-    button.secondary {
-      background-color: var(--pico-secondary-background);
-      color: var(--pico-secondary-inverse);
-    }
-    /* Honeypot field - hidden from users but visible to bots */
-    .visually-hidden {
-      position: absolute;
-      left: -9999px;
-      height: 1px;
-      width: 1px;
-      overflow: hidden;
-    }
+  {{css-style}}
   </style>
 </head>
 <body>
   <main class=\"container\">
     <article>
       <div>
-          <h1>{% firstof list-name page.heading %}</h1>
-          <p>{{page.subheading}}</p>
+        <h1>{% firstof list-name page.heading %}</h1>
+        <p>{{page.subheading}}</p>
         <form hx-post=\"{{subscribe_path}}\" hx-target=\"#result\" hx-swap=\"outerHTML\" hx-indicator=\"#loading\">
           <input type=\"email\" id=\"email\" name=\"email\" placeholder=\"{{form.email-placeholder}}\" required>
-          <!-- CSRF Protection -->
           <input type=\"hidden\" name=\"csrf_token\" value=\"{{csrf_token}}\">
-          <!-- Honeypot field - bots will fill this out, humans won't see it -->
           <div class=\"visually-hidden\">
             <label for=\"website\">{{form.website-label}}</label>
             <input type=\"text\" id=\"website\" name=\"website\" autocomplete=\"off\">
@@ -689,6 +641,7 @@
           </div>
           <progress id=\"loading\" class=\"htmx-indicator\"></progress>
         </form>
+        <p class=\"footer\">{{page.footer|safe}}</p>
       </div>
     </article>
     <div id=\"result\"></div>
@@ -707,39 +660,7 @@
   <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\">
   <script src=\"https://unpkg.com/htmx.org@2.0.0\"></script>
   <style>
-    /* Custom styles matching the subscribe page */
-    .container {
-      max-width: 800px;
-      padding: 2rem 1rem;
-      margin: 0 auto;
-    }
-    @media (max-width: 768px) {
-      .container {
-        width: 100%;
-        padding: 1rem;
-      }
-    }
-    .success {
-      border-left: 5px solid var(--pico-color-green-550);
-    }
-    .error {
-      border-left: 5px solid var(--pico-color-red-550);
-    }
-    .warning {
-      border-left: 5px solid var(--pico-color-yellow-550);
-    }
-    .info {
-      border-left: 5px solid var(--pico-color-blue-550);
-    }
-    .debug {
-      margin-top: 1rem;
-      padding: 1rem;
-      background-color: var(--pico-background-muted);
-      border-radius: var(--pico-border-radius);
-      white-space: pre-wrap;
-      display: none;
-      font-size: 0.85rem;
-    }
+  {{css-style}}
   </style>
 </head>
 <body>
@@ -913,6 +834,7 @@
   (selmer/render
    index-template
    {:lang           lang
+    :css-style      css-style
     :list-name      (config :mailgun-list-name)
     :page           (:page strings)
     :form           (:form strings)
@@ -926,6 +848,7 @@
     (selmer/render
      confirmation-template
      {:lang           lang
+      :css-style      css-style
       :page-title     (:title (:page strings))
       :list-name      (config :mailgun-list-name)
       :message-type   message-type
