@@ -50,6 +50,9 @@
 ;; - subscribe-smtp-user
 ;; - subscribe-smtp-pass
 ;; - subscribe-smtp-from
+;; - css-file
+;; - index-tpl
+;; - confirm-tpl
 ;;
 ;; ~$ subscribe -h # Show more information
 
@@ -66,35 +69,29 @@
             [clojure.spec.alpha :as s]
             [babashka.deps :as deps]))
 
-(def version "0.6")
-
 (deps/add-deps '{:deps {org.clojars.askonomm/ruuter {:mvn/version "1.3.4"}}})
 (pods/load-pod 'tzzh/mail "0.0.3")
 (require '[ruuter.core :as ruuter]
          '[pod.tzzh.mail :as mail])
 
-(defn print-version []
-  (println (format "subscribe %s" version))
-  (System/exit 0))
-
 (def cli-options
-  {:help      {:alias :h :desc "Display help"}
-   :version   {:alias :v :desc "Describe version"}
-   :port      {:alias :p :desc "Port number" :default 8080 :coerce :int}
-   :base-path {:alias :b :desc "Base path" :coerce :string}
-   :base-url  {:alias :u :desc "Base URL for confirmation links (no port)" :coerce :string}
-   :log-level {:alias :l :desc "Log level (debug, info, warn, error)" :default "info" :coerce :string}
-   :config    {:alias :C :desc "Config file path" :coerce :string}
-   :log-file  {:alias :L :desc "Log file" :coerce :string}})
+  (into
+   (sorted-map)
+   {:help        {:alias :h :desc "Display help"}
+    :port        {:alias :p :desc "Port number" :default 8080 :coerce :int}
+    :base-path   {:alias :b :desc "Base path" :coerce :string}
+    :base-url    {:alias :u :desc "Base URL for confirmation links (no port)" :coerce :string}
+    :log-level   {:alias :l :desc "Log level (debug, info, warn, error)" :default "info" :coerce :string}
+    :config      {:alias :c :desc "Config file path" :coerce :string}
+    :log-file    {:alias :L :desc "Log file" :coerce :string}
+    :css-file    {:alias :S :desc "CSS file path" :coerce :string}
+    :index-tpl   {:alias :I :desc "Index HTML template file path" :coerce :string}
+    :confirm-tpl {:alias :C :desc "Confirmation HTML template file path" :coerce :string}}))
 
 (defn print-usage []
   (println "Usage: subscribe [options]")
   (println "\nOptions:")
-  (doseq [[k v] cli-options]
-    (println (format "  --%s\t-%s\t%s"
-                     (name k)
-                     (name (:alias v))
-                     (:desc v))))
+  (println (cli/format-opts {:spec cli-options}))
   (println "\nEnvironment variables:")
   (println "  MAILGUN_LIST_ID             Mailgun list identifier")
   (println "  MAILGUN_API_ENDPOINT        Mailgun API endpoint")
@@ -111,9 +108,12 @@
   (println "  subscribe -p 8888           # Run on port 4444")
   (println "  subscribe -l debug          # Specify log level as \"debug\"")
   (println "  subscribe -L log.txt        # Specify a log file name")
+  (println "  subscribe -c config.edn     # Load configuration from file")
   (println "  subscribe -b /app           # Set base path to /app")
   (println "  subscribe -u https://z.org  # Set confirmation URL")
-  (println "  subscribe -c config.edn     # Load configuration from file")
+  (println "  subscribe -S style.css      # Load CSS from file")
+  (println "  subscribe -I index.html     # Load index template from file")
+  (println "  subscribe -C confirm.html   # Load confirmation template from file")
   (System/exit 0))
 
 ;; Setting defaults
@@ -135,6 +135,9 @@
 (s/def ::mailgun-list-id (s/and string? #(not (re-find #"\s" %))))
 (s/def ::mailgun-api-endpoint (s/and string? #(not (re-find #"\s" %))))
 (s/def ::base-path string?)
+(s/def ::css-file string?)
+(s/def ::index-tpl string?)
+(s/def ::confirm-tpl string?)
 (s/def ::smtp-config
   (s/keys :req [::subscribe-smtp-host ::subscribe-smtp-port
                 ::subscribe-smtp-user ::subscribe-smtp-pass
@@ -146,7 +149,10 @@
                    ::mailgun-list-name
                    ::mailgun-api-endpoint
                    ::base-path
-                   ::base-url]
+                   ::base-url
+                   ::css-file
+                   ::index-tpl
+                   ::confirm-tpl]
           :opt [::smtp-config]))
 
 (s/def ::form-email ::email)
@@ -649,22 +655,8 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
 </body>
 </html>")
 
-(def confirmation-template
-  "<!DOCTYPE html>
-<html lang=\"{{lang}}\">
-<head>
-  <meta charset=\"UTF-8\">
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
-  <title>{{page-title}}{% if list-name|not-empty %} - {{list-name}}{% endif %}</title>
-  <link rel=\"icon\" href=\"data:image/png;base64,iVBORw0KGgo=\">
-  <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\">
-  <script src=\"https://unpkg.com/htmx.org@2.0.0\"></script>
-  <style>
-  {{css-style}}
-  </style>
-</head>
-<body>
-  <main id=\"result\" {% if show-back-link %}class=\"container\"{% endif %}>
+(def confirm-template
+  "<main id=\"result\" {% if show-back-link %}class=\"container\"{% endif %}>
     <article class=\"card {{message-type}}\">
       <h1>{{heading}}</h1>
       <p>{{message|safe-str}}</p>
@@ -679,9 +671,120 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
       <a href=\"{{base-path}}\" class=\"secondary\" role=\"button\">{{back}}</a>
     </div>
     {% endif %}
-  </main>
-</body>
-</html>")
+  </main>")
+
+(defn render-index-html [strings lang csrf-token]
+  (selmer/render
+   (or (config :index-tpl) index-template)
+   {:lang           lang
+    :css-style      (or (config :css-style) css-style)
+    :list-name      (config :mailgun-list-name)
+    :page           (:page strings)
+    :form           (:form strings)
+    :subscribe_path (make-path "subscribe")
+    :csrf_token     csrf-token}))
+
+(defn render-confirmation-html [strings lang message-type heading message & [debug-info]]
+  (let [show-back-link
+        (or (= heading (get-in strings [:messages :subscription-confirmation-success]))
+            (= heading (get-in strings [:messages :unsubscription-confirmation-success])))]
+    (selmer/render
+     (or (config :confirm-tpl) confirm-template)
+     {:lang           lang
+      :css-style      (or (config :css-style) css-style)
+      :page-title     (:title (:page strings))
+      :list-name      (config :mailgun-list-name)
+      :message-type   message-type
+      :heading        heading
+      :message        message
+      :debug-info     debug-info
+      :back           (get-in strings [:messages :back-to-subscription])
+      :base-path      (make-path "")
+      :show-back-link show-back-link})))
+
+(defn escape-html [^String s]
+  (when (not-empty s)
+    (-> s
+        (str/replace "&" "&amp;")
+        (str/replace "<" "&lt;")
+        (str/replace ">" "&gt;")
+        (str/replace "\"" "&quot;")
+        (str/replace "'" "&#39;"))))
+
+(defn result-template [strings type message-key & args]
+  (let [lang     (keyword (or (first (filter keyword? args)) :en))
+        heading  (get-in strings [:messages message-key])
+        message  (get-in strings [:messages (keyword (str (name message-key) "-message"))])
+        msg-args (filter string? args)]
+    (render-confirmation-html
+     strings
+     lang
+     type
+     heading
+     (if (seq msg-args)
+       (apply format message (map escape-html msg-args))
+       message))))
+
+(defn debug-result-template [strings type message & debug-info]
+  (let [lang      (or (first (filter keyword? debug-info)) :en)
+        debug-str (when (seq debug-info)
+                    (str "\n\nDebug Info:\n" (escape-html (str (remove keyword? debug-info)))))]
+    (render-confirmation-html
+     strings
+     lang
+     type
+     message
+     (escape-html message)
+     debug-str)))
+
+(def base-security-headers
+  {"X-Content-Type-Options" "nosniff"
+   "X-Frame-Options"        "DENY"})
+
+(def security-headers
+  (merge base-security-headers
+         {"Content-Security-Policy" "default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:;"}))
+
+(def security-headers-self
+  (merge base-security-headers
+         {"Content-Security-Policy" "default-src 'self';"}))
+
+(defn make-response [status type strings heading-key message-key & args]
+  {:status  status
+   :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
+   :body    (apply result-template strings type heading-key message-key args)})
+
+(defn determine-language [req]
+  (let [accept-language (get-in req [:headers "accept-language"] "")]
+    (cond
+      ;; Check Accept-Language header for supported languages
+      (str/includes? accept-language "fr") :fr
+      :else                                :en)))
+
+(defn handle-error [req e debug-info]
+  (log/error "Error:" (str e))
+  (log/error "Stack trace:" (with-out-str (.printStackTrace e)))
+  (let [lang    (determine-language req)
+        strings (get-ui-strings lang)]
+    {:status  500
+     :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
+     :body    (debug-result-template
+               strings
+               "error"
+               :operation-failed
+               (get-in strings [:messages :server-error])
+               (str "Exception: " (.getMessage e) "\n\n"
+                    "Debug info:\n" debug-info))}))
+
+(defn check-if-subscribed [email]
+  (log/info "Checking if email is already subscribed:" email)
+  (let [url      (get-mailgun-member-url email)
+        _        (log/debug "Making request to check subscription status:" url)
+        response (make-mailgun-request :get url nil)]
+    (log/debug "Mailgun API check response status:" (:status response))
+    (log/debug "Mailgun API check response body:" (:body response))
+    (and (not (:error response))
+         (= 200 (:status response)))))
 
 (defn send-confirmation-email [{:keys [email token lang action]
                                 :or   {action :subscribe lang :en}}]
@@ -736,196 +839,6 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
                         " confirmation email:") (.getMessage e))
         {:success false
          :message (.getMessage e)}))))
-
-(defn read-config-file [file-path]
-  (try
-    (if (.exists (java.io.File. file-path))
-      (let [config-content (slurp file-path)]
-        (log/info "Reading configuration from:" file-path)
-        (edn/read-string {:readers {}} config-content))
-      (log/warn "Configuration file not found:" file-path))
-    (catch Exception e
-      (log/error "Error reading configuration file:" (.getMessage e)))))
-
-(defn merge-ui-strings! [config-data]
-  (when-let [config-ui-strings (:ui-strings config-data)]
-    (swap! app-config update :ui-strings
-           (fn [original]
-             (merge-with (fn [orig new] (merge-with merge orig new))
-                         original
-                         config-ui-strings)))
-    (log/info "Merged UI strings from configuration file")))
-
-(defn update-config-from-file! [file-path]
-  (when file-path
-    (log/info "Using configuration file:" file-path)
-    (when-let [config-data (read-config-file file-path)]
-      (if-not (validate-config config-data)
-        (System/exit 0)
-        (do ;; Merge UI strings first to handle the nested structure
-          (merge-ui-strings! config-data)
-          ;; Handle path normalization for specific fields
-          (let [processed-config
-                (cond-> (dissoc config-data :ui-strings)
-                  ;; Process base-path if present
-                  (:base-path config-data)
-                  (update :base-path normalize-path)
-                  ;; Process base-url if present
-                  (:base-url config-data)
-                  (update :base-url normalize-url))]
-            ;; Log what we're updating
-            (doseq [k (keys processed-config)]
-              (log/info "Updating config:" k))
-            ;; Update the config with the processed values
-            (swap! app-config merge processed-config)))))))
-
-(defn determine-language [req]
-  (let [accept-language (get-in req [:headers "accept-language"] "")]
-    (cond
-      ;; Check Accept-Language header for supported languages
-      (str/includes? accept-language "fr") :fr
-      :else                                :en)))
-
-(defn get-client-ip [req]
-  (or (get-in req [:headers "x-forwarded-for"])
-      (get-in req [:headers "x-real-ip"])
-      (:remote-addr req)
-      "unknown-ip"))
-
-(defn rate-limited? [ip]
-  (let [now             (System/currentTimeMillis)
-        window-start    (- now rate-limit-window)
-        requests        (get @ip-request-log ip [])
-        recent-requests (filter #(>= % window-start) requests)]
-    ;; Prune old entries periodically
-    (when (or (> (- now @last-pruned-time) rate-limit-window)
-              (> (count @ip-request-log) 1000))
-      (swap! ip-request-log
-             (fn [log-map]
-               (reduce-kv (fn [m k v] (assoc m k (filter #(>= % window-start) v)))
-                          {} log-map)))
-      (reset! last-pruned-time now))
-    ;; Update the request log with the current timestamp
-    (swap! ip-request-log update ip #(conj (or % []) now))
-    ;; Prune old entries every 1000 IP requests
-    (when (> (count @ip-request-log) 1000)
-      (swap! ip-request-log
-             (fn [log-map]
-               (reduce-kv (fn [m k v]
-                            (assoc m k (filter #(>= % window-start) v)))
-                          {}
-                          log-map))))
-    (> (count recent-requests) max-requests-per-window)))
-
-(defn honeypot-filled? [form-data]
-  (not (str/blank? (str (:website form-data)))))
-
-(defn escape-html [^String s]
-  (when (not-empty s)
-    (-> s
-        (str/replace "&" "&amp;")
-        (str/replace "<" "&lt;")
-        (str/replace ">" "&gt;")
-        (str/replace "\"" "&quot;")
-        (str/replace "'" "&#39;"))))
-
-;; Render HTML template using Selmer
-(defn render-index-html [strings lang csrf-token]
-  (selmer/render
-   index-template
-   {:lang           lang
-    :css-style      css-style
-    :list-name      (config :mailgun-list-name)
-    :page           (:page strings)
-    :form           (:form strings)
-    :subscribe_path (make-path "subscribe")
-    :csrf_token     csrf-token}))
-
-(defn render-confirmation-html [strings lang message-type heading message & [debug-info]]
-  (let [show-back-link
-        (or (= heading (get-in strings [:messages :subscription-confirmation-success]))
-            (= heading (get-in strings [:messages :unsubscription-confirmation-success])))]
-    (selmer/render
-     confirmation-template
-     {:lang           lang
-      :css-style      css-style
-      :page-title     (:title (:page strings))
-      :list-name      (config :mailgun-list-name)
-      :message-type   message-type
-      :heading        heading
-      :message        message
-      :debug-info     debug-info
-      :back           (get-in strings [:messages :back-to-subscription])
-      :base-path      (make-path "")
-      :show-back-link show-back-link})))
-
-(defn result-template [strings type message-key & args]
-  (let [lang     (keyword (or (first (filter keyword? args)) :en))
-        heading  (get-in strings [:messages message-key])
-        message  (get-in strings [:messages (keyword (str (name message-key) "-message"))])
-        msg-args (filter string? args)]
-    (render-confirmation-html
-     strings
-     lang
-     type
-     heading
-     (if (seq msg-args)
-       (apply format message (map escape-html msg-args))
-       message))))
-
-(defn debug-result-template [strings type message & debug-info]
-  (let [lang      (or (first (filter keyword? debug-info)) :en)
-        debug-str (when (seq debug-info)
-                    (str "\n\nDebug Info:\n" (escape-html (str (remove keyword? debug-info)))))]
-    (render-confirmation-html
-     strings
-     lang
-     type
-     message
-     (escape-html message)
-     debug-str)))
-
-(def base-security-headers
-  {"X-Content-Type-Options" "nosniff"
-   "X-Frame-Options"        "DENY"})
-
-(def security-headers
-  (merge base-security-headers
-         {"Content-Security-Policy" "default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:;"}))
-
-(def security-headers-self
-  (merge base-security-headers
-         {"Content-Security-Policy" "default-src 'self';"}))
-
-(defn make-response [status type strings heading-key message-key & args]
-  {:status  status
-   :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-   :body    (apply result-template strings type heading-key message-key args)})
-
-(defn handle-error [req e debug-info]
-  (log/error "Error:" (str e))
-  (log/error "Stack trace:" (with-out-str (.printStackTrace e)))
-  (let [lang    (determine-language req)
-        strings (get-ui-strings lang)]
-    {:status  500
-     :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-     :body    (debug-result-template
-               strings
-               "error"
-               :operation-failed
-               (get-in strings [:messages :server-error])
-               (str "Exception: " (.getMessage e) "\n\n"
-                    "Debug info:\n" debug-info))}))
-
-(defn check-if-subscribed [email]
-  (log/info "Checking if email is already subscribed:" email)
-  (let [url      (get-mailgun-member-url email)
-        _        (log/debug "Making request to check subscription status:" url)
-        response (make-mailgun-request :get url nil)]
-    (log/debug "Mailgun API check response status:" (:status response))
-    (log/debug "Mailgun API check response body:" (:body response))
-    (and (not (:error response))
-         (= 200 (:status response)))))
 
 (defn handle-subscription-request [email lang]
   (log/info "Handling subscription request for:" email)
@@ -1090,6 +1003,12 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
     ;; Default case for unknown action
     (make-response 400 "error" strings :unknown-action :unknown-action)))
 
+(defn get-client-ip [req]
+  (or (get-in req [:headers "x-forwarded-for"])
+      (get-in req [:headers "x-real-ip"])
+      (:remote-addr req)
+      "unknown-ip"))
+
 (defn handle-index [req]
   (let [lang       (determine-language req)
         strings    (get-ui-strings lang)
@@ -1099,6 +1018,31 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
     {:status  200
      :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
      :body    (render-index-html strings lang csrf-token)}))
+
+(defn rate-limited? [ip]
+  (let [now             (System/currentTimeMillis)
+        window-start    (- now rate-limit-window)
+        requests        (get @ip-request-log ip [])
+        recent-requests (filter #(>= % window-start) requests)]
+    ;; Prune old entries periodically
+    (when (or (> (- now @last-pruned-time) rate-limit-window)
+              (> (count @ip-request-log) 1000))
+      (swap! ip-request-log
+             (fn [log-map]
+               (reduce-kv (fn [m k v] (assoc m k (filter #(>= % window-start) v)))
+                          {} log-map)))
+      (reset! last-pruned-time now))
+    ;; Update the request log with the current timestamp
+    (swap! ip-request-log update ip #(conj (or % []) now))
+    ;; Prune old entries every 1000 IP requests
+    (when (> (count @ip-request-log) 1000)
+      (swap! ip-request-log
+             (fn [log-map]
+               (reduce-kv (fn [m k v]
+                            (assoc m k (filter #(>= % window-start) v)))
+                          {}
+                          log-map))))
+    (> (count recent-requests) max-requests-per-window)))
 
 (defn handle-subscribe [req]
   (log/debug "Request method:" (:request-method req))
@@ -1126,7 +1070,7 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
             (log/warn "Rate limit exceeded for IP:" client-ip)
             (make-response 429 "error" strings :rate-limit :rate-limit-message))
           ;; Anti-spam: honeypot check
-          (if (honeypot-filled? form-data)
+          (if (not (str/blank? (str (:website form-data))))
             (do
               (log/warn "Spam detected: honeypot field filled from IP:" client-ip)
               (make-response 400 "error" strings :spam-detected :spam-detected-message))
@@ -1225,12 +1169,53 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
       (catch Throwable e
         (handle-error req e (str "URI: " uri))))))
 
+(defn merge-ui-strings! [config-data]
+  (when-let [config-ui-strings (:ui-strings config-data)]
+    (swap! app-config update :ui-strings
+           (fn [original]
+             (merge-with (fn [orig new] (merge-with merge orig new))
+                         original
+                         config-ui-strings)))
+    (log/info "Merged UI strings from configuration file")))
+
+(defn update-config-from-file! [file-path]
+  (when file-path
+    (log/info "Using configuration file:" file-path)
+    (when-let [config-data (edn/read-string (slurp file-path))]
+      (if-not (validate-config config-data)
+        (System/exit 0)
+        (do ;; Merge UI strings first to handle the nested structure
+          (merge-ui-strings! config-data)
+          ;; Handle path normalization for specific fields
+          (let [processed-config
+                (cond-> (dissoc config-data :ui-strings)
+                  ;; Process base-path if present
+                  (:base-path config-data)
+                  (update :base-path normalize-path)
+                  ;; Process base-url if present
+                  (:base-url config-data)
+                  (update :base-url normalize-url))]
+            ;; Log what we're updating
+            (doseq [k (keys processed-config)]
+              (log/info "Updating config:" k))
+            ;; Update the config with the processed values
+            (swap! app-config merge processed-config))
+          ;; Load templates and CSS from files specified in config
+          (when-let [css (:css-file config-data)]
+            (when-let [css-content (slurp css)]
+              (swap! app-config assoc :css-style css-content)))
+          (when-let [index-file (:index-tpl config-data)]
+            (when-let [index-content (slurp index-file)]
+              (swap! app-config assoc :index-tpl index-content)))
+          (when-let [confirmation-file (:confirm-tpl config-data)]
+            (when-let [confirmation-content (slurp confirmation-file)]
+              (swap! app-config assoc :confirm-tpl confirmation-content))))))))
+
 (defn -main [& args]
   (let [opts (cli/parse-opts args {:spec cli-options})
         port (get opts :port 8080)]
-    ;; Handle help and version option
+    ;; Handle help
     (when (:help opts) (print-usage))
-    (when (:version opts) (print-version))
     ;; Update base-url with specified port when provided
     (when-let [specified-port (get opts :port)]
       (swap! app-config assoc :base-url (generate-default-base-url specified-port))
@@ -1243,7 +1228,20 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
     (when-let [path (:base-path opts)]
       (swap! app-config assoc :base-path (normalize-path path))
       (log/info "Setting base-path from command line:" path))
-    ;; Process configuration file if provided
+    ;; Process template files if provided via command line
+    (when-let [css (:css-file opts)]
+      (when-let [css-content (slurp css)]
+        (swap! app-config assoc :css-style css-content)
+        (log/info "Loaded CSS from file:" css)))
+    (when-let [index-file (:index-tpl opts)]
+      (when-let [index-content (slurp index-file)]
+        (swap! app-config assoc :index-tpl index-content)
+        (log/info "Loaded index template from file:" index-file)))
+    (when-let [confirmation-file (:confirm-tpl opts)]
+      (when-let [confirmation-content (slurp confirmation-file)]
+        (swap! app-config assoc :confirm-tpl confirmation-content)
+        (log/info "Loaded confirmation template from file:" confirmation-file)))
+    ;; Process configuration file if provided (this will override individual settings)
     (when-let [config-path (:config opts)]
       (update-config-from-file! config-path))
     ;; Log configuration state after all updates
@@ -1273,6 +1271,13 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
     (if (config :base-url)
       (log/info "SUBSCRIBE_BASE_URL=" (config :base-url))
       (log/warn "SUBSCRIBE_BASE_URL not set, use http://localhost"))
+    ;; Log template file configurations
+    (when (config :css-file)
+      (log/info "Using custom CSS style"))
+    (when (config :index-tpl)
+      (log/info "Using custom index template"))
+    (when (config :confirm-tpl)
+      (log/info "Using custom confirmation template"))
     ;; Configure Timbre logging
     (let [appenders (merge {:println (log/println-appender {:stream :auto})}
                            (when-let [f (get opts :log-file)]
