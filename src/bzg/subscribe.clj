@@ -50,7 +50,6 @@
 ;; - subscribe-smtp-user
 ;; - subscribe-smtp-pass
 ;; - subscribe-smtp-from
-;; - css-file
 ;; - index-tpl
 ;; - confirm-tpl
 ;;
@@ -597,22 +596,6 @@
 ;; Configure Selmer HTML escape handling
 (filters/add-filter! :safe-str (fn [x] [:safe x]))
 
-(def css-style
-  ".container {max-width: 800px; padding: 2rem 1rem; margin: 0 auto;}
-@media (max-width: 768px) {.container {width: 100%; padding: 1rem;}}
-.success {border-left: 5px solid var(--pico-color-green-550);}
-.error {border-left: 5px solid var(--pico-color-red-550);}
-.warning {border-left: 5px solid var(--pico-color-yellow-550);}
-.info {border-left: 5px solid var(--pico-color-blue-550);}
-.debug {margin-top: 1rem; padding: 1rem; background-color: var(--pico-background-muted); border-radius: var(--pico-border-radius); white-space: pre-wrap; display: none; font-size: 0.85rem;}
-.htmx-indicator {opacity: 0; transition: opacity 200ms ease-in;}
-.htmx-request .htmx-indicator {opacity: 1;}
-button.primary {background-color: var(--pico-primary-background); color: var(--pico-primary-inverse);}
-button.secondary {background-color: var(--pico-secondary-background); color: var(--pico-secondary-inverse);}
-.visually-hidden {position: absolute;left: -9999px; height: 1px; width: 1px; overflow: hidden;}
-.card {padding: 2rem; margin-bottom: 1rem;}
-.footer {text-align: center;font-size: .8rem;}")
-
 ;; Selmer Templates
 (def index-template
   "<!DOCTYPE html>
@@ -625,7 +608,20 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
   <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\">
   <script src=\"https://unpkg.com/htmx.org@2.0.0\"></script>
   <style>
-  {{css-style}}
+  .container {max-width: 800px; padding: 2rem 1rem; margin: 0 auto;}
+  @media (max-width: 768px) {.container {width: 100%; padding: 1rem;}}
+  .success {border-left: 5px solid var(--pico-color-green-550);}
+  .error {border-left: 5px solid var(--pico-color-red-550);}
+  .warning {border-left: 5px solid var(--pico-color-yellow-550);}
+  .info {border-left: 5px solid var(--pico-color-blue-550);}
+  .debug {margin-top: 1rem; padding: 1rem; background-color: var(--pico-background-muted); border-radius: var(--pico-border-radius); white-space: pre-wrap; display: none; font-size: 0.85rem;}
+  .htmx-indicator {opacity: 0; transition: opacity 200ms ease-in;}
+  .htmx-request .htmx-indicator {opacity: 1;}
+  button.primary {background-color: var(--pico-primary-background); color: var(--pico-primary-inverse);}
+  button.secondary {background-color: var(--pico-secondary-background); color: var(--pico-secondary-inverse);}
+  .visually-hidden {position: absolute;left: -9999px; height: 1px; width: 1px; overflow: hidden;}
+  .card {padding: 2rem; margin-bottom: 1rem;}
+  .footer {text-align: center;font-size: .8rem;}
   </style>
 </head>
 <body>
@@ -677,7 +673,6 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
   (selmer/render
    (or (config :index-tpl) index-template)
    {:lang           lang
-    :css-style      (or (config :css-style) css-style)
     :list-name      (config :mailgun-list-name)
     :page           (:page strings)
     :form           (:form strings)
@@ -691,7 +686,6 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
     (selmer/render
      (or (config :confirm-tpl) confirm-template)
      {:lang           lang
-      :css-style      (or (config :css-style) css-style)
       :page-title     (:title (:page strings))
       :list-name      (config :mailgun-list-name)
       :message-type   message-type
@@ -1201,9 +1195,6 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
             ;; Update the config with the processed values
             (swap! app-config merge processed-config))
           ;; Load templates and CSS from files specified in config
-          (when-let [css (:css-file config-data)]
-            (when-let [css-content (slurp css)]
-              (swap! app-config assoc :css-style css-content)))
           (when-let [index-file (:index-tpl config-data)]
             (when-let [index-content (slurp index-file)]
               (swap! app-config assoc :index-tpl index-content)))
@@ -1229,10 +1220,6 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
       (swap! app-config assoc :base-path (normalize-path path))
       (log/info "Setting base-path from command line:" path))
     ;; Process template files if provided via command line
-    (when-let [css (:css-file opts)]
-      (when-let [css-content (slurp css)]
-        (swap! app-config assoc :css-style css-content)
-        (log/info "Loaded CSS from file:" css)))
     (when-let [index-file (:index-tpl opts)]
       (when-let [index-content (slurp index-file)]
         (swap! app-config assoc :index-tpl index-content)
@@ -1272,8 +1259,6 @@ button.secondary {background-color: var(--pico-secondary-background); color: var
       (log/info "SUBSCRIBE_BASE_URL=" (config :base-url))
       (log/warn "SUBSCRIBE_BASE_URL not set, use http://localhost"))
     ;; Log template file configurations
-    (when (config :css-file)
-      (log/info "Using custom CSS style"))
     (when (config :index-tpl)
       (log/info "Using custom index template"))
     (when (config :confirm-tpl)
