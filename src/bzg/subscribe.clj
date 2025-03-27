@@ -51,7 +51,6 @@
 ;; - subscribe-smtp-pass
 ;; - subscribe-smtp-from
 ;; - index-tpl
-;; - confirm-tpl
 ;;
 ;; ~$ subscribe -h # Show more information
 
@@ -84,8 +83,7 @@
     :config      {:alias :c :desc "Config file path" :coerce :string}
     :log-file    {:alias :L :desc "Log file" :coerce :string}
     :css-file    {:alias :S :desc "CSS file path" :coerce :string}
-    :index-tpl   {:alias :I :desc "Index HTML template file path" :coerce :string}
-    :confirm-tpl {:alias :C :desc "Confirmation HTML template file path" :coerce :string}}))
+    :index-tpl   {:alias :I :desc "Index HTML template file path" :coerce :string}}))
 
 (defn print-usage []
   (println "Usage: subscribe [options]")
@@ -112,7 +110,6 @@
   (println "  subscribe -u https://z.org  # Set confirmation URL")
   (println "  subscribe -S style.css      # Load CSS from file")
   (println "  subscribe -I index.html     # Load index template from file")
-  (println "  subscribe -C confirm.html   # Load confirmation template from file")
   (System/exit 0))
 
 ;; Setting defaults
@@ -136,7 +133,6 @@
 (s/def ::base-path string?)
 (s/def ::css-file string?)
 (s/def ::index-tpl string?)
-(s/def ::confirm-tpl string?)
 (s/def ::smtp-config
   (s/keys :req [::subscribe-smtp-host ::subscribe-smtp-port
                 ::subscribe-smtp-user ::subscribe-smtp-pass
@@ -150,8 +146,7 @@
                    ::base-path
                    ::base-url
                    ::css-file
-                   ::index-tpl
-                   ::confirm-tpl]
+                   ::index-tpl]
           :opt [::smtp-config]))
 
 (s/def ::form-email ::email)
@@ -596,7 +591,7 @@
 ;; Configure Selmer HTML escape handling
 (filters/add-filter! :safe-str (fn [x] [:safe x]))
 
-;; Selmer Templates
+  ;; Single template for the entire application
 (def index-template
   "<!DOCTYPE html>
 <html lang=\"{{lang}}\">
@@ -626,6 +621,7 @@
 </head>
 <body>
   <main class=\"container\">
+    {% if not hide-form %}
     <article>
       <div>
         <h1>{% firstof list-name page.heading %}</h1>
@@ -646,28 +642,29 @@
         <p class=\"footer\">{{page.footer|safe}}</p>
       </div>
     </article>
-    <div id=\"result\"></div>
+    {% endif %}
+
+    <div id=\"result\">
+      {% if show-message %}
+      <article class=\"card {{message-type}}\">
+        <h1>{{heading}}</h1>
+        <p>{{message|safe-str}}</p>
+        {% if debug-info %}
+        <div class=\"debug\">
+          {{debug-info}}
+        </div>
+        {% endif %}
+      </article>
+      {% if show-back-link %}
+      <div>
+        <a href=\"{{base-path}}\" class=\"secondary\" role=\"button\">{{back}}</a>
+      </div>
+      {% endif %}
+      {% endif %}
+    </div>
   </main>
 </body>
 </html>")
-
-(def confirm-template
-  "<main id=\"result\" {% if show-back-link %}class=\"container\"{% endif %}>
-    <article class=\"card {{message-type}}\">
-      <h1>{{heading}}</h1>
-      <p>{{message|safe-str}}</p>
-      {% if debug-info %}
-      <div class=\"debug\">
-        {{debug-info}}
-      </div>
-      {% endif %}
-    </article>
-    {% if show-back-link %}
-    <div>
-      <a href=\"{{base-path}}\" class=\"secondary\" role=\"button\">{{back}}</a>
-    </div>
-    {% endif %}
-  </main>")
 
 (defn render-index-html [strings lang csrf-token]
   (selmer/render
@@ -677,24 +674,38 @@
     :page           (:page strings)
     :form           (:form strings)
     :subscribe_path (make-path "subscribe")
-    :csrf_token     csrf-token}))
+    :csrf_token     csrf-token
+    :hide-form      false}))
 
-(defn render-confirmation-html [strings lang message-type heading message & [debug-info]]
-  (let [show-back-link
-        (or (= heading (get-in strings [:messages :subscription-confirmation-success]))
-            (= heading (get-in strings [:messages :unsubscription-confirmation-success])))]
-    (selmer/render
-     (or (config :confirm-tpl) confirm-template)
-     {:lang           lang
-      :page-title     (:title (:page strings))
-      :list-name      (config :mailgun-list-name)
-      :message-type   message-type
-      :heading        heading
-      :message        message
-      :debug-info     debug-info
-      :back           (get-in strings [:messages :back-to-subscription])
-      :base-path      (make-path "")
-      :show-back-link show-back-link})))
+(defn render-result-html [strings lang message-type heading message & {:keys [debug-info show-back-link full-page]}]
+  (selmer/render
+   (or (config :index-tpl) index-template)
+   {:lang           lang
+    :page-title     (:title (:page strings))
+    :list-name      (config :mailgun-list-name)
+    :message-type   message-type
+    :heading        heading
+    :message        message
+    :debug-info     debug-info
+    :back           (get-in strings [:messages :back-to-subscription])
+    :base-path      (make-path "")
+    :show-back-link show-back-link
+    :hide-form      full-page
+    :show-message   true
+    :page           (:page strings)}))
+
+(defn render-result-fragment [strings message-type heading message & {:keys [debug-info show-back-link]}]
+  (str "<div id=\"result\">"
+       "<article class=\"card " message-type "\">"
+       "<h1>" heading "</h1>"
+       "<p>" message "</p>"
+       (when debug-info
+         (str "<div class=\"debug\">" debug-info "</div>"))
+       "</article>"
+       (when show-back-link
+         (str "<div><a href=\"" (make-path "") "\" class=\"secondary\" role=\"button\">"
+              (get-in strings [:messages :back-to-subscription]) "</a></div>"))
+       "</div>"))
 
 (defn escape-html [^String s]
   (when (not-empty s)
@@ -709,27 +720,52 @@
   (let [lang     (keyword (or (first (filter keyword? args)) :en))
         heading  (get-in strings [:messages message-key])
         message  (get-in strings [:messages (keyword (str (name message-key) "-message"))])
-        msg-args (filter string? args)]
-    (render-confirmation-html
-     strings
-     lang
-     type
-     heading
-     (if (seq msg-args)
-       (apply format message (map escape-html msg-args))
-       message))))
+        msg-args (filter string? args)
+        show-back-link (or (= message-key :subscription-confirmation-success)
+                           (= message-key :unsubscription-confirmation-success))
+        full-page (boolean (some #{:full-page} args))]
+    (if full-page
+      (render-result-html
+       strings
+       lang
+       type
+       heading
+       (if (seq msg-args)
+         (apply format message (map escape-html msg-args))
+         message)
+       :show-back-link show-back-link
+       :full-page full-page)
+      (render-result-fragment
+       strings
+       lang
+       type
+       heading
+       (if (seq msg-args)
+         (apply format message (map escape-html msg-args))
+         message)
+       :show-back-link show-back-link))))
 
 (defn debug-result-template [strings type message & debug-info]
   (let [lang      (or (first (filter keyword? debug-info)) :en)
         debug-str (when (seq debug-info)
-                    (str "\n\nDebug Info:\n" (escape-html (str (remove keyword? debug-info)))))]
-    (render-confirmation-html
-     strings
-     lang
-     type
-     message
-     (escape-html message)
-     debug-str)))
+                    (str "\n\nDebug Info:\n" (escape-html (str (remove keyword? debug-info)))))
+        full-page (boolean (some #{:full-page} debug-info))]
+    (if full-page
+      (render-result-html
+       strings
+       lang
+       type
+       message
+       (escape-html message)
+       :debug-info debug-str
+       :full-page full-page)
+      (render-result-fragment
+       strings
+       lang
+       type
+       message
+       (escape-html message)
+       :debug-info debug-str))))
 
 (def base-security-headers
   {"X-Content-Type-Options" "nosniff"
@@ -744,9 +780,23 @@
          {"Content-Security-Policy" "default-src 'self';"}))
 
 (defn make-response [status type strings heading-key message-key & args]
-  {:status  status
-   :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-   :body    (apply result-template strings type heading-key message-key args)})
+  (let [is-htmx           (boolean (some #{:htmx} args))
+        is-full-page      (boolean (some #{:full-page} args))
+        args-without-flag (remove #{:htmx :full-page} args)]
+    (if is-full-page
+      {:status  status
+       :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
+       :body    (apply result-template strings type heading-key message-key (conj (vec args-without-flag) :full-page))}
+      (if is-htmx
+        {:status  status
+         :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
+         :body    (apply result-template strings type heading-key message-key args-without-flag)}
+        {:status  status
+         :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
+         :body    (render-index-html
+                   (get-ui-strings (keyword (or (first (filter keyword? args-without-flag)) :en)))
+                   (keyword (or (first (filter keyword? args-without-flag)) :en))
+                   (or (some #{:csrf-token} args-without-flag) ""))}))))
 
 (defn determine-language [req]
   (let [accept-language (get-in req [:headers "accept-language"] "")]
@@ -759,7 +809,8 @@
   (log/error "Error:" (str e))
   (log/error "Stack trace:" (with-out-str (.printStackTrace e)))
   (let [lang    (determine-language req)
-        strings (get-ui-strings lang)]
+        strings (get-ui-strings lang)
+        is-htmx (= "true" (get-in req [:headers "hx-request"]))]
     {:status  500
      :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
      :body    (debug-result-template
@@ -768,7 +819,8 @@
                :operation-failed
                (get-in strings [:messages :server-error])
                (str "Exception: " (.getMessage e) "\n\n"
-                    "Debug info:\n" debug-info))}))
+                    "Debug info:\n" debug-info)
+               (when-not is-htmx :full-page))}))
 
 (defn check-if-subscribed [email]
   (log/info "Checking if email is already subscribed:" email)
@@ -942,60 +994,68 @@
       (log/error "Request that caused error:"
                  (pr-str (select-keys req [:uri :query-string]))))))
 
-(defn process-subscription-action [strings lang action email]
-  (case action
-    "subscribe"
-    (let [result (handle-subscription-request email lang)]
-      (cond
-        (:already_subscribed result)
-        (make-response 200 "success" strings :already-subscribed :already-subscribed-message email)
-        (:confirmation_sent result)
-        (make-response 200 "info" strings :confirmation-sent :confirmation-sent-message email)
-        (:confirmation_failed result)
-        {:status  400
-         :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-         :body    (debug-result-template
-                   strings
-                   "error"
-                   :confirmation-email-failed
-                   (format (get-in strings [:messages :confirmation-email-failed-message]) email)
-                   (str "Debug info:\n" (pr-str result)))}
-        :else
-        {:status  400
-         :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-         :body    (debug-result-template
-                   strings
-                   "error"
-                   :operation-failed
-                   (or (:message result) (get-in strings [:messages :server-error]))
-                   (str "Debug info:\n" (pr-str result)))}))
-    "unsubscribe"
-    (let [result (handle-unsubscribe-request email lang)]
-      (cond
-        (:not_subscribed result)
-        (make-response 200 "warning" strings :not-subscribed :not-subscribed-message email)
-        (:confirmation_sent result)
-        (make-response 200 "info" strings :confirmation-sent :confirmation-sent-message email)
-        (:confirmation_failed result)
-        {:status  400
-         :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-         :body    (debug-result-template
-                   strings
-                   "error"
-                   :confirmation-email-failed
-                   (format (get-in strings [:messages :confirmation-email-failed-message]) email)
-                   (str "Debug info:\n" (pr-str result)))}
-        :else
-        {:status  400
-         :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-         :body    (debug-result-template
-                   strings
-                   "error"
-                   :operation-failed
-                   (or (:message result) (get-in strings [:messages :server-error]))
-                   (str "Debug info:\n" (pr-str result)))}))
-    ;; Default case for unknown action
-    (make-response 400 "error" strings :unknown-action :unknown-action)))
+(defn is-htmx-request? [req]
+  (= "true" (get-in req [:headers "hx-request"])))
+
+(defn process-subscription-action [strings lang action email req]
+  (let [is-htmx (is-htmx-request? req)]
+    (case action
+      "subscribe"
+      (let [result (handle-subscription-request email lang)]
+        (cond
+          (:already_subscribed result)
+          (make-response 200 "success" strings :already-subscribed :already-subscribed-message email (when is-htmx :htmx))
+          (:confirmation_sent result)
+          (make-response 200 "info" strings :confirmation-sent :confirmation-sent-message email (when is-htmx :htmx))
+          (:confirmation_failed result)
+          {:status  400
+           :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
+           :body    (debug-result-template
+                     strings
+                     "error"
+                     :confirmation-email-failed
+                     (format (get-in strings [:messages :confirmation-email-failed-message]) email)
+                     (str "Debug info:\n" (pr-str result))
+                     (when-not is-htmx :full-page))}
+          :else
+          {:status  400
+           :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
+           :body    (debug-result-template
+                     strings
+                     "error"
+                     :operation-failed
+                     (or (:message result) (get-in strings [:messages :server-error]))
+                     (str "Debug info:\n" (pr-str result))
+                     (when-not is-htmx :full-page))}))
+      "unsubscribe"
+      (let [result (handle-unsubscribe-request email lang)]
+        (cond
+          (:not_subscribed result)
+          (make-response 200 "warning" strings :not-subscribed :not-subscribed-message email (when is-htmx :htmx))
+          (:confirmation_sent result)
+          (make-response 200 "info" strings :confirmation-sent :confirmation-sent-message email (when is-htmx :htmx))
+          (:confirmation_failed result)
+          {:status  400
+           :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
+           :body    (debug-result-template
+                     strings
+                     "error"
+                     :confirmation-email-failed
+                     (format (get-in strings [:messages :confirmation-email-failed-message]) email)
+                     (str "Debug info:\n" (pr-str result))
+                     (when-not is-htmx :full-page))}
+          :else
+          {:status  400
+           :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
+           :body    (debug-result-template
+                     strings
+                     "error"
+                     :operation-failed
+                     (or (:message result) (get-in strings [:messages :server-error]))
+                     (str "Debug info:\n" (pr-str result))
+                     (when-not is-htmx :full-page))}))
+      ;; Default case for unknown action
+      (make-response 400 "error" strings :unknown-action :unknown-action (when is-htmx :htmx)))))
 
 (defn get-client-ip [req]
   (or (get-in req [:headers "x-forwarded-for"])
@@ -1048,34 +1108,36 @@
           client-ip       (get-client-ip req)
           lang            (determine-language req)
           strings         (get-ui-strings lang)
-          form-csrf-token (:csrf_token form-data)]
+          form-csrf-token (:csrf_token form-data)
+          is-htmx         (is-htmx-request? req)]
       (log/debug "Parsed form data:" (pr-str form-data))
       (log/debug "Email from form:" email)
       (log/debug "Action from form:" action)
       (log/debug "CSRF token from form:" form-csrf-token)
+      (log/debug "Is HTMX request:" is-htmx)
       ;; CSRF Protection check
       (if-not (validate-csrf-token form-csrf-token client-ip)
         (do
           (log/warn "CSRF token validation failed")
-          (make-response 403 "error" strings :csrf-invalid :csrf-invalid-message))
+          (make-response 403 "error" strings :csrf-invalid :csrf-invalid-message (when is-htmx :htmx)))
         ;; Anti-spam: rate limiting
         (if (rate-limited? client-ip)
           (do
             (log/warn "Rate limit exceeded for IP:" client-ip)
-            (make-response 429 "error" strings :rate-limit :rate-limit-message))
+            (make-response 429 "error" strings :rate-limit :rate-limit-message (when is-htmx :htmx)))
           ;; Anti-spam: honeypot check
           (if (not (str/blank? (str (:website form-data))))
             (do
               (log/warn "Spam detected: honeypot field filled from IP:" client-ip)
-              (make-response 400 "error" strings :spam-detected :spam-detected-message))
+              (make-response 400 "error" strings :spam-detected :spam-detected-message (when is-htmx :htmx)))
             ;; Email validation
             (if (s/valid? ::subscription-form form-data)
               ;; Process valid form
-              (process-subscription-action strings lang action email)
+              (process-subscription-action strings lang action email req)
               ;; Handle invalid form
               (let [explain (s/explain-str ::subscription-form form-data)]
                 (log/error "Invalid form submission:" explain)
-                (make-response 400 "error" strings :invalid-email :invalid-email-message email)))))))
+                (make-response 400 "error" strings :invalid-email :invalid-email-message email (when is-htmx :htmx))))))))
     (catch Throwable e
       (handle-error req e (str "Request method: " (name (:request-method req)) "\n"
                                "Headers: " (pr-str (:headers req)))))))
@@ -1093,7 +1155,7 @@
       (if (str/blank? token)
         (do
           (log/warn "Missing token in confirmation request")
-          (make-response 400 "error" strings :confirmation-error :confirmation-error-message))
+          (make-response 400 "error" strings :confirmation-error :confirmation-error-message :full-page))
         (let [result (process-confirmation-token token)]
           (log/debug "Confirmation result:" (pr-str result))
           (cond
@@ -1104,9 +1166,10 @@
              strings
              (or (:confirm-type result) :confirmation-success)
              (or (:confirm-type result) :confirmation-success-message)
-             (:email result))
+             (:email result)
+             :full-page)
             (:invalid_token result)
-            (make-response 400 "error" strings :confirmation-error :confirmation-error-message)
+            (make-response 400 "error" strings :confirmation-error :confirmation-error-message :full-page)
             :else
             {:status  400
              :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
@@ -1115,7 +1178,8 @@
                        "error"
                        :operation-failed
                        (or (:message result) (get-in strings [:messages :server-error]))
-                       (str "Debug info:\n" (pr-str result)))}))))
+                       (str "Debug info:\n" (pr-str result))
+                       :full-page)}))))
     (catch Throwable e
       (handle-error req e (str "URI: " (:uri req))))))
 
@@ -1125,7 +1189,7 @@
         count-str (str (count @token-store))]
     {:status  200
      :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-     :body    (result-template strings "info" :tokens :tokens-message count-str)}))
+     :body    (result-template strings "info" :tokens :tokens-message count-str :full-page)}))
 
 (defn handle-robots-txt []
   {:status  200
@@ -1194,13 +1258,10 @@
               (log/info "Updating config:" k))
             ;; Update the config with the processed values
             (swap! app-config merge processed-config))
-          ;; Load templates and CSS from files specified in config
+          ;; Load template if specified in config
           (when-let [index-file (:index-tpl config-data)]
             (when-let [index-content (slurp index-file)]
-              (swap! app-config assoc :index-tpl index-content)))
-          (when-let [confirmation-file (:confirm-tpl config-data)]
-            (when-let [confirmation-content (slurp confirmation-file)]
-              (swap! app-config assoc :confirm-tpl confirmation-content))))))))
+              (swap! app-config assoc :index-tpl index-content))))))))
 
 (defn -main [& args]
   (let [opts (cli/parse-opts args {:spec cli-options})
@@ -1219,15 +1280,11 @@
     (when-let [path (:base-path opts)]
       (swap! app-config assoc :base-path (normalize-path path))
       (log/info "Setting base-path from command line:" path))
-    ;; Process template files if provided via command line
+    ;; Process template file if provided via command line
     (when-let [index-file (:index-tpl opts)]
       (when-let [index-content (slurp index-file)]
         (swap! app-config assoc :index-tpl index-content)
         (log/info "Loaded index template from file:" index-file)))
-    (when-let [confirmation-file (:confirm-tpl opts)]
-      (when-let [confirmation-content (slurp confirmation-file)]
-        (swap! app-config assoc :confirm-tpl confirmation-content)
-        (log/info "Loaded confirmation template from file:" confirmation-file)))
     ;; Process configuration file if provided (this will override individual settings)
     (when-let [config-path (:config opts)]
       (update-config-from-file! config-path))
@@ -1258,11 +1315,9 @@
     (if (config :base-url)
       (log/info "SUBSCRIBE_BASE_URL=" (config :base-url))
       (log/warn "SUBSCRIBE_BASE_URL not set, use http://localhost"))
-    ;; Log template file configurations
+    ;; Log template file configuration
     (when (config :index-tpl)
       (log/info "Using custom index template"))
-    (when (config :confirm-tpl)
-      (log/info "Using custom confirmation template"))
     ;; Configure Timbre logging
     (let [appenders (merge {:println (log/println-appender {:stream :auto})}
                            (when-let [f (get opts :log-file)]
