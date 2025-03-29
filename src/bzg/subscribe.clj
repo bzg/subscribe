@@ -242,26 +242,20 @@
       (reset! last-cleanup-time now))))
 
 ;; Path and URL normalization functions
-(defn normalize-path [path]
-  (if (str/blank? path)
-    ""
-    (-> path
-        str/trim
-        ;; Remove duplicate slashes
-        (str/replace #"/{2,}" "/")
-        ;; Add single leading slash
-        (as-> p (if (str/starts-with? p "/") p (str "/" p)))
-        ;; Remove any trailing slash
-        (str/replace #"/$" ""))))
+(def normalize-path
+  (memoize #(if (str/blank? %)
+              ""
+              (-> % str/trim
+                  ;; Remove duplicate slashes
+                  (str/replace #"/{2,}" "/")
+                  ;; Add single leading slash
+                  (as-> p (if (str/starts-with? p "/") p (str "/" p)))
+                  ;; Remove any trailing slash
+                  (str/replace #"/$" "")))))
 
-(defn normalize-url
-  [url & {:keys [trailing-slash] :or {trailing-slash false}}]
-  (when (not-empty url)
-    (cond-> url
-      (not trailing-slash) (str/replace #"/$" "")
-      trailing-slash       (as-> u (if (str/ends-with? u "/") u (str u "/"))))))
+(def normalize-url (memoize #(str/replace % #"/$" "" )))
 
-(defn join-paths
+(defn join-paths-0
   "Join multiple path segments together with proper handling of slashes."
   [& segments]
   (or (->> segments
@@ -270,6 +264,8 @@
            (apply str)
            not-empty)
       "/"))
+
+(def join-paths (memoize join-paths-0))
 
 (defn join-url [base-url & path-segments]
   (when (not-empty base-url)
@@ -295,7 +291,7 @@
   (let [port-str     (str port)
         default-base (or (System/getenv "SUBSCRIBE_BASE_URL")
                          (str "http://localhost:" port-str))]
-    (normalize-url default-base :trailing-slash true)))
+    (str (normalize-url default-base) "/")))
 
 ;; Setup UI strings with internationalization support
 (def ui-strings-data
