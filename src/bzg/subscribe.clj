@@ -632,7 +632,7 @@
 </body>
 </html>")
 
-(defn escape-html [^String s]
+(defn escape-html [s]
   (when (not-empty s)
     (-> s
         (str/replace "&" "&amp;")
