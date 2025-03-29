@@ -56,17 +56,17 @@
 ;; ~$ subscribe -h # Show more information
 
 (ns bzg.subscribe
-  (:require [org.httpkit.server :as server]
+  (:require [babashka.cli :as cli]
+            [babashka.deps :as deps]
             [babashka.http-client :as http]
-            [clojure.string :as str]
-            [taoensso.timbre :as log]
-            [clojure.edn :as edn]
-            [babashka.cli :as cli]
             [babashka.pods :as pods]
-            [selmer.parser :as selmer]
-            [selmer.filters :as filters]
+            [clojure.edn :as edn]
             [clojure.spec.alpha :as s]
-            [babashka.deps :as deps]))
+            [clojure.string :as str]
+            [org.httpkit.server :as server]
+            [selmer.filters :as filters]
+            [selmer.parser :as selmer]
+            [taoensso.timbre :as log]))
 
 (deps/add-deps '{:deps {org.clojars.askonomm/ruuter {:mvn/version "1.3.4"}}})
 (pods/load-pod 'tzzh/mail "0.0.3")
@@ -163,13 +163,9 @@
           :opt-un [::form-action ::website]))
 
 (defn validate-config [config-data]
-  (if (s/valid? ::config config-data)
-    true
-    (do
-      (log/error "Invalid configuration:" (s/explain-str ::config config-data))
-      false)))
+  (or (s/valid? ::config config-data)
+      (log/error "Invalid configuration:" (s/explain-str ::config config-data))))
 
-;; Token management
 (def token-expirations
   {:csrf        (* 8 60 60 1000) ;; 8 hours for CSRF tokens
    :subscribe   (* 24 60 60 1000) ;; 24 hours for subscription confirmations
@@ -192,8 +188,7 @@
     (log/debug "Created token:" token-key "of type" token-type)
     token-key))
 
-(defn validate-token [token-key & {:keys [token-type consume]
-                                   :or   {consume false}}]
+(defn validate-token [token-key & {:keys [token-type consume] :or {consume false}}]
   (when (string? token-key)
     (let [token-data (get @token-store token-key)
           now        (System/currentTimeMillis)]
@@ -205,8 +200,8 @@
           (swap! token-store dissoc token-key))
         token-data))))
 
-(defn consume-token [token-key & {:keys [token-type] :or {token-type nil}}]
-  (when-let [token-data (validate-token token-key :token-type token-type :consume true)]
+(defn consume-token [token-key]
+  (when-let [token-data (validate-token token-key :consume true)]
     (:data token-data)))
 
 (defn create-subscription-token [email]
@@ -232,11 +227,7 @@
 
 (defn cleanup-expired-tokens []
   (let [now (System/currentTimeMillis)]
-    (swap! token-store
-           (fn [tokens]
-             (into {} (filter (fn [[_ data]]
-                                (< now (:expires-at data)))
-                              tokens))))
+    (swap! token-store #(into {} (filter (fn [[_ data]] (< now (:expires-at data))) %)))
     (log/debug "Cleaned up expired tokens")))
 
 (def cleanup-interval (* 60 60 1000)) ;; 1 hour in milliseconds
@@ -256,33 +247,30 @@
         str/trim
         ;; Remove duplicate slashes
         (str/replace #"/{2,}" "/")
-        ;; Handle leading slash
+        ;; Add single leading slash
         (as-> p (if (str/starts-with? p "/") p (str "/" p)))
-        ;; Handle trailing slash
+        ;; Remove any trailing slash
         (str/replace #"/$" ""))))
 
 (defn normalize-url
-  "Normalize a URL by ensuring consistent format."
   [url & {:keys [trailing-slash] :or {trailing-slash false}}]
-  (when-not (str/blank? url)
-    (let [url-with-protocol (if (re-find #"^[a-z]+://" url)
-                              url
-                              (str "http://" url))]
-      (cond-> url-with-protocol
-        (not trailing-slash) (str/replace #"/$" "")
-        trailing-slash       (as-> u (if (str/ends-with? u "/") u (str u "/")))))))
+  (when (not-empty url)
+    (cond-> url
+      (not trailing-slash) (str/replace #"/$" "")
+      trailing-slash       (as-> u (if (str/ends-with? u "/") u (str u "/"))))))
 
 (defn join-paths
   "Join multiple path segments together with proper handling of slashes."
   [& segments]
-  (let [filtered-segments   (remove str/blank? segments)
-        normalized-segments (map normalize-path filtered-segments)]
-    (if (empty? normalized-segments)
-      "/"
-      (str/join "/" normalized-segments))))
+  (or (->> segments
+           (remove str/blank?)
+           (map normalize-path)
+           (apply str)
+           not-empty)
+      "/"))
 
 (defn join-url [base-url & path-segments]
-  (when-not (str/blank? base-url)
+  (when (not-empty base-url)
     (let [normalized-base (normalize-url base-url)
           path-part       (apply join-paths path-segments)]
       (str normalized-base path-part))))
@@ -290,14 +278,13 @@
 (defn create-url-with-query [base-url path query-params]
   (let [url          (join-url base-url path)
         query-string (when (seq query-params)
-                       (str/join "&"
-                                 (map (fn [[k v]]
-                                        ;; Special handling for token to avoid double-encoding
-                                        (if (= k :token)
-                                          (str (name k) "=" v)
-                                          (str (name k) "="
-                                               (java.net.URLEncoder/encode (str v) "UTF-8"))))
-                                      query-params)))]
+                       (->> query-params
+                            (map (fn [[k v]]
+                                   ;; Special handling for token to avoid double-encoding
+                                   (if (= k :token)
+                                     (str (name k) "=" v)
+                                     (str (name k) "=" (java.net.URLEncoder/encode (str v) "UTF-8")))))
+                            (str/join "&")))]
     (if (seq query-string)
       (str url "?" query-string)
       url)))
@@ -431,8 +418,7 @@
          :subscribe-smtp-from  (System/getenv "SUBSCRIBE_SMTP_FROM")
          :ui-strings           ui-strings-data}))
 
-(defn config [& ks]
-  (get-in @app-config ks))
+(defn config [& ks] (get-in @app-config ks))
 
 (defn get-ui-strings
   ([lang] (get (config :ui-strings) lang))
@@ -440,36 +426,30 @@
 
 (defn with-base-path [& path-segments]
   (let [base-path       (config :base-path)
-        normalized-base (normalize-path (or base-path ""))
-        path-part       (if (seq path-segments)
-                          (apply join-paths path-segments)
-                          "/")]
-    (if (str/blank? normalized-base)
-      path-part
-      (if (= path-part "/")
-        normalized-base
-        (join-paths normalized-base path-part)))))
+        normalized-base (normalize-path base-path)
+        path-part       (apply join-paths path-segments)]
+    (cond
+      (str/blank? normalized-base) path-part
+      (= path-part "/")            normalized-base
+      :else                        (join-paths normalized-base path-part))))
 
 (defn make-path [& segments]
   (apply with-base-path segments))
 
 (defn create-confirmation-url [token]
-  (let [base-url  (config :base-url)
-        base-path (config :base-path)
-        endpoint  "/confirm"]
-    (create-url-with-query (join-url base-url (normalize-path base-path))
-                           endpoint
-                           {:token token})))
+  (create-url-with-query
+   (join-url (config :base-url) (normalize-path (config :base-path)))
+   "/confirm"
+   {:token token}))
 
 ;; Returns Authorization header value for Mailgun API requests
 (def get-mailgun-auth-header
   (memoize
-   (fn []
-     (let [auth-string  (str "api:" (config :mailgun-api-key))
-           auth-bytes   (.getBytes auth-string)
-           encoder      (java.util.Base64/getEncoder)
-           encoded-auth (.encodeToString encoder auth-bytes)]
-       (str "Basic " encoded-auth)))))
+   #(let [auth-string  (str "api:" (config :mailgun-api-key))
+          auth-bytes   (.getBytes auth-string)
+          encoder      (java.util.Base64/getEncoder)
+          encoded-auth (.encodeToString encoder auth-bytes)]
+      (str "Basic " encoded-auth))))
 
 (defn get-mailgun-member-url [email]
   (format "%s/lists/%s/members/%s"
@@ -499,6 +479,7 @@
          :stack-trace (with-out-str (.printStackTrace e))}))))
 
 (def subscription-count (atom 0))
+
 (defn warn-new-subscription! []
   (let [new-count (swap! subscription-count inc)]
     (when (zero? (mod new-count 10))
@@ -593,9 +574,6 @@
      :invalid_token true
      :message       "Invalid or expired token"}))
 
-;; Configure Selmer HTML escape handling
-(filters/add-filter! :safe-str (fn [x] [:safe x]))
-
 ;; Selmer Templates
 (def index-template
   "<!DOCTYPE html>
@@ -655,7 +633,7 @@
   "<main id=\"result\" {% if show-back-link %}class=\"container\"{% endif %}>
     <article class=\"card {{message-type}}\">
       <h1>{{heading}}</h1>
-      <p>{{message|safe-str}}</p>
+      <p>{{message|safe}}</p>
       {% if debug-info %}
       <div class=\"debug\">
         {{debug-info}}
