@@ -74,15 +74,15 @@
 (def cli-options
   (into
    (sorted-map)
-   {:help        {:alias :h :desc "Display help"}
-    :port        {:alias :p :desc "Port number" :default 8080 :coerce :int}
-    :base-path   {:alias :b :desc "Base path" :coerce :string}
-    :base-url    {:alias :u :desc "Base URL for confirmation links (no port)" :coerce :string}
-    :log-level   {:alias :l :desc "Log level (debug, info, warn, error)" :default "info" :coerce :string}
-    :config      {:alias :c :desc "Config file path" :coerce :string}
-    :log-file    {:alias :L :desc "Log file" :coerce :string}
-    :css-file    {:alias :S :desc "CSS file path" :coerce :string}
-    :index-tpl   {:alias :I :desc "Index HTML template file path" :coerce :string}}))
+   {:help      {:alias :h :desc "Display help"}
+    :port      {:alias :p :desc "Port number" :default 8080 :coerce :int}
+    :base-path {:alias :b :desc "Base path" :coerce :string}
+    :base-url  {:alias :u :desc "Base URL for confirmation links (no port)" :coerce :string}
+    :log-level {:alias :l :desc "Log level (debug, info, warn, error)" :default "info" :coerce :string}
+    :config    {:alias :c :desc "Config file path" :coerce :string}
+    :log-file  {:alias :L :desc "Log file" :coerce :string}
+    :css-file  {:alias :S :desc "CSS file path" :coerce :string}
+    :index-tpl {:alias :I :desc "Index HTML template file path" :coerce :string}}))
 
 (defn print-usage []
   (println "Usage: subscribe [options]")
@@ -303,37 +303,34 @@
      :subscribe-button   "Subscribe"
      :unsubscribe-button "Unsubscribe"}
     :messages
-    {:back-to-subscription                "Back to subscription"
-     :thank-you                           "Thank you!"
-     :success-subscribe                   "Your email <strong>%s</strong> has been successfully subscribed."
-     :already-subscribed                  "Already subscribed"
-     :already-subscribed-message          "The email <strong>%s</strong> is already subscribed."
-     :not-subscribed                      "Warning: not subscribed"
-     :not-subscribed-message              "The email <strong>%s</strong> is not currently subscribed. No action was taken."
-     :operation-failed                    "Operation failed"
-     :no-email                            "No email address provided. Please try again."
-     :rate-limit                          "Rate limit exceeded"
-     :rate-limit-message                  "Too many subscription attempts from your IP address. Please try again later."
-     :invalid-email                       "Invalid email format"
-     :invalid-email-message               "The email <strong>%s</strong> appears to be invalid. Please check the format and try again."
-     :spam-detected                       "Submission rejected"
-     :spam-detected-message               "Your submission has been identified as potential spam and has been rejected."
-     :csrf-invalid                        "Security validation failed"
-     :csrf-invalid-message                "Security token validation failed. This could happen if you used an old form or if your session expired."
-     :unknown-action                      "Unknown action requested. Please try again."
-     :server-error                        "An unexpected error occurred. Please try again later."
-     :confirmation-sent                   "Confirmation email sent"
-     :confirmation-sent-message           "A confirmation email has been sent to <strong>%s</strong>. Please check your inbox and click the confirmation link."
-     :confirmation-success                "Subscription confirmed"
-     :confirmation-success-message        "Your subscription has been confirmed. Thank you for subscribing!"
-     :confirmation-error                  "Confirmation error"
-     :confirmation-error-message          "The confirmation link is invalid or has expired. Please try subscribing again."
-     :confirmation-email-failed           "Confirmation email could not be sent"
-     :confirmation-email-failed-message   "We couldn't send a confirmation email to <strong>%s</strong>. Please try again later."
-     :tokens                              "Available confirmation tokens"
-     :tokens-message                      "Currently there are %s pending confirmation tokens."
-     :subscription-confirmation-success   "Subscription confirmed"
-     :unsubscription-confirmation-success "Unsubscription confirmed"}
+    {:back-to-subscription                     "Back to subscription"
+     :thank-you                                "Thank you!"
+     :already-subscribed                       "Already subscribed"
+     :already-subscribed-message               "The email <strong>%s</strong> is already subscribed."
+     :not-subscribed                           "Warning: not subscribed"
+     :not-subscribed-message                   "The email <strong>%s</strong> is not currently subscribed. No action was taken."
+     :operation-failed                         "Operation failed"
+     :rate-limit                               "Rate limit exceeded"
+     :rate-limit-message                       "Too many subscription attempts from your IP address. Please try again later."
+     :invalid-email                            "Invalid email format"
+     :invalid-email-message                    "The email <strong>%s</strong> appears to be invalid. Please check the format and try again."
+     :spam-detected                            "Submission rejected"
+     :spam-detected-message                    "Your submission has been identified as potential spam and has been rejected."
+     :csrf-invalid                             "Security validation failed"
+     :csrf-invalid-message                     "Security token validation failed. This could happen if you used an old form or if your session expired."
+     :unknown-action                           "Unknown action requested. Please try again."
+     :server-error                             "An unexpected error occurred. Please try again later."
+     :confirmation-sent                        "Confirmation email sent"
+     :confirmation-sent-message                "A confirmation email has been sent to <strong>%s</strong>. Please check your inbox and click the confirmation link."
+     :subscribe-confirmation-success           "Thank you!"
+     :subscribe-confirmation-success-message   "Your subscription has been confirmed. Thank you!"
+     :unsubscribe-confirmation-success         "Bye!"
+     :unsubscribe-confirmation-success-message "Your unsubscription has been confirmed."
+     :confirmation-error-message               "The confirmation link is invalid or has expired. Please try subscribing again."
+     :confirmation-email-failed                "Confirmation email could not be sent"
+     :confirmation-email-failed-message        "We couldn't send a confirmation email to <strong>%s</strong>. Please try again later."
+     :tokens                                   "Available confirmation tokens"
+     :tokens-message                           "Currently there are %s pending confirmation tokens."}
     :emails
     {:subscription-confirm-subject   "[%s] Please confirm your subscription"
      :subscription-confirm-body-text "Thank you for subscribing to our mailing list with your email address: %s.\n\nPlease confirm your subscription by clicking on this link:\n\n%s\n\nIf you did not request this subscription, you can ignore this email."
@@ -353,37 +350,34 @@
      :subscribe-button   "Abonnement"
      :unsubscribe-button "Désabonnement"}
     :messages
-    {:back-to-subscription                "Retour à l'accueil"
-     :thank-you                           "Merci !"
-     :success-subscribe                   "Votre adresse e-mail <strong>%s</strong> a été abonnée avec succès."
-     :already-subscribed                  "Déjà abonné"
-     :already-subscribed-message          "L'adresse e-mail <strong>%s</strong> est déjà abonnée."
-     :not-subscribed                      "Attention : non abonné"
-     :not-subscribed-message              "L'adresse e-mail <strong>%s</strong> n'est pas actuellement abonnée. Aucune action n'a été effectuée."
-     :operation-failed                    "Échec de l'opération"
-     :no-email                            "Aucune adresse e-mail fournie. Veuillez réessayer."
-     :rate-limit                          "Limite de taux dépassée"
-     :rate-limit-message                  "Trop de tentatives d'abonnement depuis votre adresse IP. Veuillez réessayer plus tard."
-     :invalid-email                       "Format d'e-mail invalide"
-     :invalid-email-message               "L'adresse e-mail <strong>%s</strong> semble être invalide. Veuillez vérifier le format et réessayer."
-     :spam-detected                       "Soumission rejetée"
-     :spam-detected-message               "Votre soumission a été identifiée comme spam potentiel et a été rejetée."
-     :csrf-invalid                        "Échec de validation de sécurité"
-     :csrf-invalid-message                "La validation du jeton de sécurité a échoué. Cela peut se produire si vous avez utilisé un ancien formulaire ou si votre session a expiré."
-     :unknown-action                      "Action inconnue demandée. Veuillez réessayer."
-     :server-error                        "Une erreur inattendue s'est produite. Veuillez réessayer plus tard."
-     :confirmation-sent                   "Email de confirmation envoyé"
-     :confirmation-sent-message           "Un email de confirmation a été envoyé à <strong>%s</strong>.<br/>Veuillez vérifier votre boîte de réception et cliquer sur le lien de confirmation."
-     :confirmation-success                "Abonnement confirmé"
-     :confirmation-success-message        "Votre abonnement a été confirmé. Merci de vous être abonné !"
-     :confirmation-error                  "Erreur de confirmation"
-     :confirmation-error-message          "Le lien de confirmation n'est pas valide ou a expiré.<br/>Veuillez essayer de vous abonner à nouveau."
-     :confirmation-email-failed           "L'email de confirmation n'a pas pu être envoyé."
-     :confirmation-email-failed-message   "Nous n'avons pas pu envoyer un email de confirmation à <strong>%s</strong>.<br/>Veuillez réessayer plus tard."
-     :tokens                              "Jetons de confirmation disponibles"
-     :tokens-message                      "Il y a actuellement %s jetons de confirmation en attente."
-     :subscription-confirmation-success   "Abonnement confirmé"
-     :unsubscription-confirmation-success "Désabonnement confirmé"}
+    {:back-to-subscription                     "Retour à l'accueil"
+     :thank-you                                "Merci !"
+     :already-subscribed                       "Déjà abonné"
+     :already-subscribed-message               "L'adresse e-mail <strong>%s</strong> est déjà abonnée."
+     :not-subscribed                           "Attention : non abonné"
+     :not-subscribed-message                   "L'adresse e-mail <strong>%s</strong> n'est pas actuellement abonnée. Aucune action n'a été effectuée."
+     :operation-failed                         "Échec de l'opération"
+     :rate-limit                               "Limite de taux dépassée"
+     :rate-limit-message                       "Trop de tentatives d'abonnement depuis votre adresse IP. Veuillez réessayer plus tard."
+     :invalid-email                            "Format d'e-mail invalide"
+     :invalid-email-message                    "L'adresse e-mail <strong>%s</strong> semble être invalide. Veuillez vérifier le format et réessayer."
+     :spam-detected                            "Soumission rejetée"
+     :spam-detected-message                    "Votre soumission a été identifiée comme spam potentiel et a été rejetée."
+     :csrf-invalid                             "Échec de validation de sécurité"
+     :csrf-invalid-message                     "La validation du jeton de sécurité a échoué. Cela peut se produire si vous avez utilisé un ancien formulaire ou si votre session a expiré."
+     :unknown-action                           "Action inconnue demandée. Veuillez réessayer."
+     :server-error                             "Une erreur inattendue s'est produite. Veuillez réessayer plus tard."
+     :confirmation-sent                        "Email de confirmation envoyé"
+     :confirmation-sent-message                "Un email de confirmation a été envoyé à <strong>%s</strong>.<br/>Veuillez vérifier votre boîte de réception et cliquer sur le lien de confirmation."
+     :subscribe-confirmation-success           "Merci !"
+     :subscribe-confirmation-success-message   "Votre abonnement a été confirmé."
+     :unsubscribe-confirmation-success         "Au revoir !"
+     :unsubscribe-confirmation-success-message "Votre désabonnement est confirmé."
+     :confirmation-error-message               "Le lien de confirmation n'est pas valide ou a expiré.<br/>Veuillez essayer de vous abonner à nouveau."
+     :confirmation-email-failed                "L'email de confirmation n'a pas pu être envoyé."
+     :confirmation-email-failed-message        "Nous n'avons pas pu envoyer un email de confirmation à <strong>%s</strong>.<br/>Veuillez réessayer plus tard."
+     :tokens                                   "Jetons de confirmation disponibles"
+     :tokens-message                           "Il y a actuellement %s jetons de confirmation en attente."}
     :emails
     {:subscription-confirm-subject   "[%s] Veuillez confirmer votre abonnement"
      :subscription-confirm-body-text "Merci de vous être abonné à notre liste de diffusion avec votre adresse e-mail : %s.\n\nVeuillez confirmer votre abonnement en cliquant sur le lien suivant :\n\n%s\n\nSi vous n'avez pas demandé cet abonnement, vous pouvez ignorer cet e-mail."
@@ -545,7 +539,7 @@
           (assoc result
                  :email email
                  :action :subscribe
-                 :confirm-type :subscription-confirmation-success))
+                 :confirm-type :subscribe-confirmation-success))
         :unsubscribe
         (let [result (unsubscribe-from-mailgun email)]
           (when (:success result)
@@ -553,7 +547,7 @@
           (assoc result
                  :email email
                  :action :unsubscribe
-                 :confirm-type :unsubscription-confirmation-success))
+                 :confirm-type :unsubscribe-confirmation-success))
         ;; Unknown token type
         {:success       false
          :invalid_token true
@@ -601,11 +595,9 @@
       </div>
       {% endif %}
     </article>
-    {% if show-back-link %}
     <div>
-      <a href=\"{{base-path}}\" class=\"secondary\" role=\"button\">{{back}}</a>
+      <a href=\"{{base-path}}\" class=\"secondary\" role=\"button\">{{messages.back-to-subscription}}</a>
     </div>
-    {% endif %}
     {% endif %}
 
     <!-- Subscription form (shown when there's no message) -->
@@ -645,38 +637,34 @@
 
 (defn render-html
   "Render function for form and confirmation messages."
-  [strings lang & {:keys [csrf-token message-type heading message debug-info show-back-link show-form]
+  [strings lang & {:keys [csrf-token message-type heading message debug-info show-form]
                    :or   {show-form true}}]
   (selmer/render
    (or (config :index-tpl) index-template)
    (cond-> {:lang           lang
             :list-name      (config :mailgun-list-name)
             :page           (:page strings)
+            :messages       (:messages strings)
             :form           (:form strings)
             :base-path      (make-path "")
             :subscribe_path (make-path "subscribe")
             :show-form      show-form}
      ;; Add message-related parameters if showing a message
-     message        (assoc :message-type message-type
-                           :heading heading
-                           :message message)
+     message    (assoc :message-type message-type
+                       :heading heading
+                       :message message)
      ;; Add debug info if present
-     debug-info     (assoc :debug-info debug-info)
-     ;; Add back link text if showing back link
-     show-back-link (assoc :back (get-in strings [:messages :back-to-subscription])
-                           :show-back-link true)
+     debug-info (assoc :debug-info debug-info)
      ;; Add CSRF token if displaying form
      (and show-form csrf-token)
      (assoc :csrf_token csrf-token))))
 
 (defn result-html [strings type message-key & args]
-  (let [args-seq   (if (seq args) (seq args) [])
-        lang       (keyword (or (first (filter keyword? args-seq)) :en))
-        heading    (get-in strings [:messages message-key])
-        message    (get-in strings [:messages (keyword (str (name message-key) "-message"))])
-        msg-args   (filter string? args-seq)
-        show-back-link (or (= message-key :subscription-confirmation-success)
-                           (= message-key :unsubscription-confirmation-success))]
+  (let [args-seq (if (seq args) (seq args) [])
+        lang     (keyword (or (first (filter keyword? args-seq)) :en))
+        heading  (get-in strings [:messages message-key])
+        message  (get-in strings [:messages (keyword (str (name message-key) "-message"))])
+        msg-args (filter string? args-seq)]
     (render-html
      strings
      lang
@@ -685,7 +673,6 @@
      :message (if (seq msg-args)
                 (apply format message (map escape-html msg-args))
                 (or message ""))
-     :show-back-link show-back-link
      :show-form false)))
 
 (defn debug-result-html [strings type message & debug-info]
@@ -1069,14 +1056,11 @@
           (log/info "Token processing result: " result)
           {:status  (if success? 200 400)
            :headers {"Content-Type" "text/html; charset=UTF-8"}
-           ;; FIXME: Use result-html
-           :body    (str "<html><body><h1>"
-                         (if success? "Success" "Error")
-                         "</h1><p>"
-                         (if success?
-                           (str "Email " email " has been " (name (:action result)) "d successfully.")
-                           "Invalid or expired confirmation link.")
-                         "</p><p><a href=\"/\">Return to subscription page</a></p></body></html>")})))
+           :body    (result-html strings
+                                 (if success? "success" "error")
+                                 (if success?
+                                   (keyword (str (name (:action result)) "-confirmation-success"))
+                                   :confirmation-error))})))
     (catch Exception e
       (log/error "Error processing confirmation: " e)
       {:status  500
