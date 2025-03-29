@@ -574,7 +574,6 @@
   .error {border-left: 5px solid var(--pico-color-red-550);}
   .warning {border-left: 5px solid var(--pico-color-yellow-550);}
   .info {border-left: 5px solid var(--pico-color-blue-550);}
-  .debug {margin-top: 1rem; padding: 1rem; background-color: var(--pico-background-muted); border-radius: var(--pico-border-radius); white-space: pre-wrap; display: none; font-size: 0.85rem;}
   button.primary {background-color: var(--pico-primary-background); color: var(--pico-primary-inverse);}
   button.secondary {background-color: var(--pico-secondary-background); color: var(--pico-secondary-inverse);}
   .visually-hidden {position: absolute;left: -9999px; height: 1px; width: 1px; overflow: hidden;}
@@ -589,11 +588,6 @@
     <article class=\"card {{message-type}}\">
       <h1>{{heading}}</h1>
       <p>{{message|safe}}</p>
-      {% if debug-info %}
-      <div class=\"debug\">
-        {{debug-info}}
-      </div>
-      {% endif %}
     </article>
     <div>
       <a href=\"{{base-path}}\" class=\"secondary\" role=\"button\">{{messages.back-to-subscription}}</a>
@@ -637,7 +631,7 @@
 
 (defn render-html
   "Render function for form and confirmation messages."
-  [strings lang & {:keys [csrf-token message-type heading message debug-info show-form]
+  [strings lang & {:keys [csrf-token message-type heading message show-form]
                    :or   {show-form true}}]
   (selmer/render
    (or (config :index-tpl) index-template)
@@ -650,11 +644,9 @@
             :subscribe_path (make-path "subscribe")
             :show-form      show-form}
      ;; Add message-related parameters if showing a message
-     message    (assoc :message-type message-type
-                       :heading heading
-                       :message message)
-     ;; Add debug info if present
-     debug-info (assoc :debug-info debug-info)
+     message (assoc :message-type message-type
+                    :heading heading
+                    :message message)
      ;; Add CSRF token if displaying form
      (and show-form csrf-token)
      (assoc :csrf_token csrf-token))))
@@ -673,20 +665,6 @@
      :message (if (seq msg-args)
                 (apply format message (map escape-html msg-args))
                 (or message ""))
-     :show-form false)))
-
-(defn debug-result-html [strings type message & debug-info]
-  (let [debug-seq (if (seq debug-info) (seq debug-info) [])
-        lang      (keyword (or (first (filter keyword? debug-seq)) :en))
-        debug-str (when (seq debug-seq)
-                    (str "\n\nDebug Info:\n" (escape-html (str (remove keyword? debug-seq)))))]
-    (render-html
-     strings
-     lang
-     :message-type type
-     :heading message
-     :message (escape-html message)
-     :debug-info debug-str
      :show-form false)))
 
 (def base-security-headers
@@ -720,7 +698,7 @@
         strings (get-ui-strings lang)]
     {:status  500
      :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-     :body    (debug-result-html
+     :body    (result-html
                strings
                "error"
                :operation-failed
@@ -909,19 +887,10 @@
         (make-response 200 "success" strings :already-subscribed :already-subscribed-message email)
         (:confirmation_sent result)
         (make-response 200 "info" strings :confirmation-sent :confirmation-sent-message email)
-        (:confirmation_failed result)
-        {:status  400
-         :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-         :body    (debug-result-html
-                   strings
-                   "error"
-                   :confirmation-email-failed
-                   (format (get-in strings [:messages :confirmation-email-failed-message]) email)
-                   (str "Debug info:\n" (pr-str result)))}
         :else
         {:status  400
          :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-         :body    (debug-result-html
+         :body    (result-html
                    strings
                    "error"
                    :operation-failed
@@ -934,23 +903,14 @@
         (make-response 200 "warning" strings :not-subscribed :not-subscribed-message email)
         (:confirmation_sent result)
         (make-response 200 "info" strings :confirmation-sent :confirmation-sent-message email)
-        (:confirmation_failed result)
+        :else
         {:status  400
          :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-         :body    (debug-result-html
+         :body    (result-html
                    strings
                    "error"
                    :confirmation-email-failed
                    (format (get-in strings [:messages :confirmation-email-failed-message]) email)
-                   (str "Debug info:\n" (pr-str result)))}
-        :else
-        {:status  400
-         :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-         :body    (debug-result-html
-                   strings
-                   "error"
-                   :operation-failed
-                   (or (:message result) (get-in strings [:messages :server-error]))
                    (str "Debug info:\n" (pr-str result)))}))
     ;; Default case for unknown action
     (make-response 400 "error" strings :unknown-action :unknown-action)))
@@ -1048,11 +1008,10 @@
         ;; No token provided
         {:status  400
          :headers {"Content-Type" "text/html; charset=UTF-8"}
-         :body    (str "<html><body><h1>Error</h1><p>Missing confirmation token</p></body></html>")}
+         :body    (result-html strings "error" (get-in strings [:messages :csrf-invalid]))}
         ;; Process token directly
         (let [result   (process-confirmation-token token)
-              success? (:success result)
-              email    (:email result)]
+              success? (:success result)]
           (log/info "Token processing result: " result)
           {:status  (if success? 200 400)
            :headers {"Content-Type" "text/html; charset=UTF-8"}
@@ -1065,7 +1024,7 @@
       (log/error "Error processing confirmation: " e)
       {:status  500
        :headers {"Content-Type" "text/html; charset=UTF-8"}
-       :body    "<html><body><h1>Server Error</h1><p>An error occurred while processing your request.</p></body></html>"})))
+       :body    "Something went wrong."})))
 
 (defn handle-tokens [req]
   (let [lang      (determine-language req)
