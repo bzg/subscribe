@@ -198,6 +198,14 @@
   (when-let [token-data (validate-token token-key :consume true)]
     (:data token-data)))
 
+(defn has-pending-confirmation? [email token-type]
+  (let [now (System/currentTimeMillis)]
+    (some (fn [[_ token-data]]
+            (and (= (:type token-data) token-type)
+                 (= (get-in token-data [:data :email]) email)
+                 (< now (:expires-at token-data))))
+          @token-store)))
+
 (defn create-subscription-token [email]
   (create-token :subscribe {:email email}))
 
@@ -309,11 +317,13 @@
      :already-subscribed-message               "The email <strong>%s</strong> is already subscribed."
      :not-subscribed                           "Warning: not subscribed"
      :not-subscribed-message                   "The email <strong>%s</strong> is not currently subscribed. No action was taken."
+     :confirmation-pending                     "Confirmation pending"
+     :confirmation-pending-message             "A confirmation email has already been sent to <strong>%s</strong>.<br/>Please check your inbox or spam folder for the confirmation link."
      :operation-failed                         "Operation failed"
      :rate-limit                               "Rate limit exceeded"
      :rate-limit-message                       "Too many subscription attempts from your IP address. Please try again later."
      :invalid-email                            "Invalid email format"
-     :invalid-email-message                    "The email <strong>%s</strong> appears to be invalid. Please check the format and try again."
+     :invalid-email-message                    "The email <strong>%s</strong> appears to be invalid.<br/>Please check the format and try again."
      :spam-detected                            "Submission rejected"
      :spam-detected-message                    "Your submission has been identified as potential spam and has been rejected."
      :csrf-invalid                             "Security validation failed"
@@ -321,14 +331,14 @@
      :unknown-action                           "Unknown action requested. Please try again."
      :server-error                             "An unexpected error occurred. Please try again later."
      :confirmation-sent                        "Confirmation email sent"
-     :confirmation-sent-message                "A confirmation email has been sent to <strong>%s</strong>. Please check your inbox and click the confirmation link."
+     :confirmation-sent-message                "A confirmation email has been sent to <strong>%s</strong>.<br/>Please check your inbox and click the confirmation link."
      :subscribe-confirmation-success           "Thank you!"
      :subscribe-confirmation-success-message   "Your subscription has been confirmed. Thank you!"
      :unsubscribe-confirmation-success         "Bye!"
      :unsubscribe-confirmation-success-message "Your unsubscription has been confirmed."
      :confirmation-error-message               "The confirmation link is invalid or has expired. Please try subscribing again."
      :confirmation-email-failed                "Confirmation email could not be sent"
-     :confirmation-email-failed-message        "We couldn't send a confirmation email to <strong>%s</strong>. Please try again later."
+     :confirmation-email-failed-message        "We couldn't send a confirmation email to <strong>%s</strong>.<br/>Please try again later."
      :tokens                                   "Available confirmation tokens"
      :tokens-message                           "Currently there are %s pending confirmation tokens."}
     :emails
@@ -355,12 +365,14 @@
      :already-subscribed                       "Déjà abonné"
      :already-subscribed-message               "L'adresse e-mail <strong>%s</strong> est déjà abonnée."
      :not-subscribed                           "Attention : non abonné"
-     :not-subscribed-message                   "L'adresse e-mail <strong>%s</strong> n'est pas actuellement abonnée. Aucune action n'a été effectuée."
+     :not-subscribed-message                   "L'adresse e-mail <strong>%s</strong> n'est pas actuellement abonnée.<br/>Aucune action n'a été effectuée."
+     :confirmation-pending                     "Confirmation en attente"
+     :confirmation-pending-message             "Un email de confirmation a déjà été envoyé à <strong>%s</strong>.<br/>Veuillez vérifier votre boîte de réception ou dossier spam pour le lien de confirmation."
      :operation-failed                         "Échec de l'opération"
      :rate-limit                               "Limite de taux dépassée"
      :rate-limit-message                       "Trop de tentatives d'abonnement depuis votre adresse IP. Veuillez réessayer plus tard."
      :invalid-email                            "Format d'e-mail invalide"
-     :invalid-email-message                    "L'adresse e-mail <strong>%s</strong> semble être invalide. Veuillez vérifier le format et réessayer."
+     :invalid-email-message                    "L'adresse e-mail <strong>%s</strong> semble être invalide.<br/>Veuillez vérifier le format et réessayer."
      :spam-detected                            "Soumission rejetée"
      :spam-detected-message                    "Votre soumission a été identifiée comme spam potentiel et a été rejetée."
      :csrf-invalid                             "Échec de validation de sécurité"
@@ -380,11 +392,11 @@
      :tokens-message                           "Il y a actuellement %s jetons de confirmation en attente."}
     :emails
     {:subscription-confirm-subject   "[%s] Veuillez confirmer votre abonnement"
-     :subscription-confirm-body-text "Merci de vous être abonné à notre liste de diffusion avec votre adresse e-mail : %s.\n\nVeuillez confirmer votre abonnement en cliquant sur le lien suivant :\n\n%s\n\nSi vous n'avez pas demandé cet abonnement, vous pouvez ignorer cet e-mail."
-     :subscription-confirm-body-html "<html><body><p>Merci de vous être abonné à notre liste de diffusion avec votre adresse e-mail : <strong>%s</strong>.</p><p>Veuillez confirmer votre abonnement en cliquant sur le lien suivant :</p><p><a href=\"%s\">Confirmer votre abonnement</a></p><p>Si vous n'avez pas demandé cet abonnement, vous pouvez ignorer cet e-mail.</p></body></html>"
+     :subscription-confirm-body-text "Merci de vous être abonné à notre liste de diffusion avec votre adresse e-mail : %s.\n\nVeuillez confirmer votre abonnement en cliquant sur le lien suivant :\n\n%s\n\nSi vous n'avez pas demandé cet abonnement, vous pouvez ignorer cet e-mail."
+     :subscription-confirm-body-html "<html><body><p>Merci de vous être abonné à notre liste de diffusion avec votre adresse e-mail : <strong>%s</strong>.</p><p>Veuillez confirmer votre abonnement en cliquant sur le lien suivant :</p><p><a href=\"%s\">Confirmer votre abonnement</a></p><p>Si vous n'avez pas demandé cet abonnement, vous pouvez ignorer cet e-mail.</p></body></html>"
      :unsubscribe-confirm-subject    "[%s] Veuillez confirmer votre désabonnement"
-     :unsubscribe-confirm-body-text  "Vous avez demandé à vous désabonner de notre liste de diffusion avec l'adresse e-mail : %s.\n\nVeuillez confirmer votre désabonnement en cliquant sur le lien suivant :\n\n%s\n\nSi vous n'avez pas demandé ce désabonnement, vous pouvez ignorer cet e-mail."
-     :unsubscribe-confirm-body-html  "<html><body><p>Vous avez demandé à vous désabonner de notre liste de diffusion avec l'adresse e-mail : <strong>%s</strong>.</p><p>Veuillez confirmer votre désabonnement en cliquant sur le lien suivant :</p><p><a href=\"%s\">Confirmer votre désabonnement</a></p><p>Si vous n'avez pas demandé ce désabonnement, vous pouvez ignorer cet e-mail.</p></body></html>"}}})
+     :unsubscribe-confirm-body-text  "Vous avez demandé à vous désabonner de notre liste de diffusion avec l'adresse e-mail : %s.\n\nVeuillez confirmer votre désabonnement en cliquant sur le lien suivant :\n\n%s\n\nSi vous n'avez pas demandé ce désabonnement, vous pouvez ignorer cet e-mail."
+     :unsubscribe-confirm-body-html  "<html><body><p>Vous avez demandé à vous désabonner de notre liste de diffusion avec l'adresse e-mail : <strong>%s</strong>.</p><p>Veuillez confirmer votre désabonnement en cliquant sur le lien suivant :</p><p><a href=\"%s\">Confirmer votre désabonnement</a></p><p>Si vous n'avez pas demandé ce désabonnement, vous pouvez ignorer cet e-mail.</p></body></html>"}}})
 
 (def app-config
   (atom {:mailgun-list-id      (System/getenv "MAILGUN_LIST_ID")
@@ -772,10 +784,15 @@
 
 (defn handle-subscription-request [email lang]
   (log/info "Handling subscription request for:" email)
-  (if (check-if-subscribed email)
+  (cond
     ;; Already subscribed
+    (check-if-subscribed email)
     {:already_subscribed true}
-    ;; Not subscribed, create confirmation token and send email
+    ;; Already has pending confirmation
+    (has-pending-confirmation? email :subscribe)
+    {:confirmation_pending true}
+    ;; Not subscribed and no pending confirmation, create token and send email
+    :else
     (let [token  (create-subscription-token email)
           result (send-confirmation-email
                   {:email  email
@@ -789,10 +806,15 @@
 
 (defn handle-unsubscribe-request [email lang]
   (log/info "Handling unsubscribe request for:" email)
-  (if-not (check-if-subscribed email)
+  (cond
     ;; Not currently subscribed
+    (not (check-if-subscribed email))
     {:not_subscribed true}
-    ;; Subscribed, create confirmation token and send email
+    ;; Already has pending confirmation
+    (has-pending-confirmation? email :unsubscribe)
+    {:confirmation_pending true}
+    ;; Subscribed and no pending confirmation, create token and send email
+    :else
     (let [token  (create-unsubscription-token email)
           result (send-confirmation-email
                   {:email  email
@@ -885,6 +907,8 @@
       (cond
         (:already_subscribed result)
         (make-response 200 "success" strings :already-subscribed :already-subscribed-message email)
+        (:confirmation_pending result)
+        (make-response 200 "info" strings :confirmation-pending :confirmation-pending-message email)
         (:confirmation_sent result)
         (make-response 200 "info" strings :confirmation-sent :confirmation-sent-message email)
         :else
@@ -901,6 +925,8 @@
       (cond
         (:not_subscribed result)
         (make-response 200 "warning" strings :not-subscribed :not-subscribed-message email)
+        (:confirmation_pending result)
+        (make-response 200 "info" strings :confirmation-pending :confirmation-pending-message email)
         (:confirmation_sent result)
         (make-response 200 "info" strings :confirmation-sent :confirmation-sent-message email)
         :else
