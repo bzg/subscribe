@@ -174,10 +174,7 @@
   (let [token-key  (generate-token-key)
         now        (System/currentTimeMillis)
         expiration (get token-expirations token-type (* 24 60 60 1000))
-        token-data {:type       token-type
-                    :data       data
-                    :created-at now
-                    :expires-at (+ now expiration)}]
+        token-data {:type token-type :data data :created-at now :expires-at (+ now expiration)}]
     (swap! token-store assoc token-key token-data)
     (log/debug "Created token:" token-key "of type" token-type)
     token-key))
@@ -189,14 +186,8 @@
       (when (and token-data
                  (< now (:expires-at token-data))
                  (or (nil? token-type) (= token-type (:type token-data))))
-        ;; If consume flag is true, remove the token after validation
-        (when consume
-          (swap! token-store dissoc token-key))
+        (when consume (swap! token-store dissoc token-key))
         token-data))))
-
-(defn consume-token [token-key]
-  (when-let [token-data (validate-token token-key :consume true)]
-    (:data token-data)))
 
 (defn has-pending-confirmation? [email token-type]
   (let [now (System/currentTimeMillis)]
@@ -206,66 +197,33 @@
                  (< now (:expires-at token-data))))
           @token-store)))
 
-(defn create-subscription-token [email]
-  (create-token :subscribe {:email email}))
-
-(defn create-unsubscription-token [email]
-  (create-token :unsubscribe {:email email}))
-
 (defn get-or-create-csrf-token [ip]
   (let [existing-tokens (filter (fn [[_ data]]
                                   (and (= (:type data) :csrf)
                                        (= (get-in data [:data :ip]) ip)))
                                 @token-store)]
     (if (seq existing-tokens)
-      ;; Return the first valid token for this IP
       (first (keys existing-tokens))
-      ;; Create a new token
       (create-token :csrf {:ip ip}))))
 
 (defn validate-csrf-token [token-key ip]
   (when-let [token-data (validate-token token-key :token-type :csrf)]
     (= (get-in token-data [:data :ip]) ip)))
 
-(defn cleanup-expired-tokens []
-  (let [now (System/currentTimeMillis)]
-    (swap! token-store #(into {} (filter (fn [[_ data]] (< now (:expires-at data))) %)))
-    (log/debug "Cleaned up expired tokens")))
+(defn normalize-path [path]
+  (if (str/blank? path)
+    ""
+    (-> path str/trim
+        (str/replace #"/{2,}" "/")
+        (as-> p (if (str/starts-with? p "/") p (str "/" p)))
+        (str/replace #"/$" ""))))
 
-(def cleanup-interval (* 60 60 1000)) ;; 1 hour in milliseconds
-(def last-cleanup-time (atom (System/currentTimeMillis)))
+(defn normalize-url [url] (str/replace url #"/$" "" ))
 
-(defn schedule-cleanup-if-needed []
-  (let [now (System/currentTimeMillis)]
-    (when (> (- now @last-cleanup-time) cleanup-interval)
-      (cleanup-expired-tokens)
-      (reset! last-cleanup-time now))))
-
-;; Path and URL normalization functions
-(def normalize-path
-  (memoize #(if (str/blank? %)
-              ""
-              (-> % str/trim
-                  ;; Remove duplicate slashes
-                  (str/replace #"/{2,}" "/")
-                  ;; Add single leading slash
-                  (as-> p (if (str/starts-with? p "/") p (str "/" p)))
-                  ;; Remove any trailing slash
-                  (str/replace #"/$" "")))))
-
-(def normalize-url (memoize #(str/replace % #"/$" "" )))
-
-(defn join-paths-0
+(defn join-paths
   "Join multiple path segments together with proper handling of slashes."
   [& segments]
-  (or (->> segments
-           (remove str/blank?)
-           (map normalize-path)
-           (apply str)
-           not-empty)
-      "/"))
-
-(def join-paths (memoize join-paths-0))
+  (or (->> segments (remove str/blank?) (map normalize-path) (apply str) not-empty) "/"))
 
 (defn join-url [base-url & path-segments]
   (when (not-empty base-url)
@@ -279,7 +237,6 @@
                          (str "http://localhost:" port-str))]
     (str (normalize-url default-base) "/")))
 
-;; Setup UI strings with internationalization support
 (def ui-strings-data
   {:en
    {:page
@@ -310,8 +267,6 @@
      :spam-detected-message                    "Your submission has been identified as potential spam and has been rejected."
      :csrf-invalid                             "Security validation failed"
      :csrf-invalid-message                     "Security token validation failed. This could happen if you used an old form or if your session expired."
-     :unknown-action                           "Unknown action requested. Please try again."
-     :server-error                             "An unexpected error occurred. Please try again later."
      :confirmation-sent                        "Confirmation email sent"
      :confirmation-sent-message                "<p>A confirmation email has been sent to <code>%s</code>.</p><p>Please check your inbox and click the confirmation link.<p>"
      :subscribe-confirmation-success           "Thank you!"
@@ -321,9 +276,7 @@
      :confirmation-error                       "Confirmation error"
      :confirmation-error-message               "The confirmation link is invalid or has expired. Please try subscribing again."
      :confirmation-email-failed                "Confirmation email could not be sent"
-     :confirmation-email-failed-message        "<p>We couldn't send a confirmation email to <code>%s</code>.</p><p>Please try again later.<p>"
-     :tokens                                   "Available confirmation tokens"
-     :tokens-message                           "Currently there are %s pending confirmation tokens."}
+     :confirmation-email-failed-message        "<p>We couldn't send a confirmation email to <code>%s</code>.</p><p>Please try again later.<p>"}
     :emails
     {:subscription-confirm-subject   "[%s] Please confirm your subscription"
      :subscription-confirm-body-text "Thank you for subscribing to our mailing list with your email address: %s.\n\nPlease confirm your subscription by clicking on this link:\n\n%s\n\nIf you did not request this subscription, you can ignore this email."
@@ -360,8 +313,6 @@
      :spam-detected-message                    "Votre soumission a été identifiée comme spam potentiel et a été rejetée."
      :csrf-invalid                             "Échec de validation de sécurité"
      :csrf-invalid-message                     "La validation du jeton de sécurité a échoué. Cela peut se produire si vous avez utilisé un ancien formulaire ou si votre session a expiré."
-     :unknown-action                           "Action inconnue demandée. Veuillez réessayer."
-     :server-error                             "Une erreur inattendue s'est produite. Veuillez réessayer plus tard."
      :confirmation-sent                        "Email de confirmation envoyé"
      :confirmation-sent-message                "<p>Un email de confirmation a été envoyé à <code>%s</code>.</p><p>Veuillez vérifier votre boîte de réception et cliquer sur le lien de confirmation.</p>"
      :subscribe-confirmation-success           "Merci !"
@@ -371,9 +322,7 @@
      :confirmation-error                       "Erreur de confirmation"
      :confirmation-error-message               "<p>Le lien de confirmation n'est pas valide ou a expiré.<p/><p>Veuillez essayer de vous abonner à nouveau.</p>"
      :confirmation-email-failed                "L'email de confirmation n'a pas pu être envoyé."
-     :confirmation-email-failed-message        "<p>Nous n'avons pas pu envoyer un email de confirmation à <code>%s</code>.</p><p>Veuillez réessayer plus tard.</p>"
-     :tokens                                   "Jetons de confirmation disponibles"
-     :tokens-message                           "Il y a actuellement %s jetons de confirmation en attente."}
+     :confirmation-email-failed-message        "<p>Nous n'avons pas pu envoyer un email de confirmation à <code>%s</code>.</p><p>Veuillez réessayer plus tard.</p>"}
     :emails
     {:subscription-confirm-subject   "[%s] Veuillez confirmer votre abonnement"
      :subscription-confirm-body-text "Merci de vous être abonné à notre liste de diffusion avec votre adresse e-mail : %s.\n\nVeuillez confirmer votre abonnement en cliquant sur le lien suivant :\n\n%s\n\nSi vous n'avez pas demandé cet abonnement, vous pouvez ignorer cet e-mail."
@@ -399,9 +348,8 @@
 
 (defn config [& ks] (get-in @app-config ks))
 
-(defn get-ui-strings
-  ([lang] (get (config :ui-strings) lang))
-  ([] (get-ui-strings :en)))
+(defn get-ui-strings [& [lang]]
+  (get (config :ui-strings) (or lang :en)))
 
 (defn with-base-path [& path-segments]
   (let [base-path       (config :base-path)
@@ -435,11 +383,6 @@
           (config :mailgun-list-id)
           (java.net.URLEncoder/encode email "UTF-8")))
 
-(defn get-mailgun-members-url []
-  (format "%s/lists/%s/members"
-          (config :mailgun-api-endpoint)
-          (config :mailgun-list-id)))
-
 (defn make-mailgun-request [method url body-params]
   (let [auth-header  (get-mailgun-auth-header)
         request-opts (cond-> {:headers {"Authorization" auth-header} :throw false}
@@ -465,11 +408,12 @@
 
 (defn subscribe-to-mailgun [email]
   (log/info "Subscribing email to Mailgun:" email)
-  (let [url         (get-mailgun-members-url)
+  (let [url         (format "%s/lists/%s/members"
+                            (config :mailgun-api-endpoint)
+                            (config :mailgun-list-id))
         body-params (format "address=%s&subscribed=yes&upsert=yes"
                             (java.net.URLEncoder/encode email "UTF-8"))
-        _           (log/debug "Making request to Mailgun API:" url)
-        _           (log/debug "Body:" body-params)
+        _           (log/debug "Making request to Mailgun API:" url body-params)
         response    (make-mailgun-request :post url body-params)]
     (log/debug "Mailgun API response status:" (:status response))
     (log/debug "Mailgun API response body:" (:body response))
@@ -524,8 +468,9 @@
 
 (defn process-confirmation-token [token-key]
   (if-let [token-data (validate-token token-key)]
-    (let [token-type (:type token-data)
-          email      (get-in token-data [:data :email])]
+    (let [token-type    (:type token-data)
+          email         (get-in token-data [:data :email])
+          consume-token #(when-let [token-data (validate-token % :consume true) (:data token-data)])]
       (case token-type
         :subscribe
         (let [result (subscribe-to-mailgun email)]
@@ -543,16 +488,9 @@
                  :email email
                  :action :unsubscribe
                  :confirm-type :unsubscribe-confirmation-success))
-        ;; Unknown token type
-        {:success       false
-         :invalid_token true
-         :message       "Unknown token type"}))
-    ;; Invalid or expired token
-    {:success       false
-     :invalid_token true
-     :message       "Invalid or expired token"}))
+        {:success false :invalid_token true :message "Unknown token type"}))
+    {:success false :invalid_token true :message "Invalid or expired token"}))
 
-;; Selmer Template
 (def index-template
   "<!DOCTYPE html>
 <html lang=\"{{lang}}\">
@@ -583,12 +521,13 @@
     <article class=\"card {{message-type}}\">
       <h1>{{heading}}</h1>
       <p>{{message|safe}}</p>
+      <br/>
       <div style=\"text-align: center;\">
         <a href=\"{{base-path}}\" class=\"secondary\" role=\"button\">{{messages.back-to-subscription}}</a>
       </div>
     </article>
+    <footer class=\"footer\">{{page.footer|safe}}</footer>
     {% endif %}
-
     <!-- Subscription form (shown when there's no message) -->
     {% if show-form %}
     <article>
@@ -626,8 +565,7 @@
 
 (defn render-html
   "Render function for form and confirmation messages."
-  [strings lang & {:keys [csrf-token message-type heading message show-form]
-                   :or   {show-form true}}]
+  [strings lang & {:keys [csrf-token message-type heading message show-form] :or {show-form true}}]
   (selmer/render
    (or (config :index-tpl) index-template)
    (cond-> {:lang           lang
@@ -650,15 +588,12 @@
   (let [strings (get-ui-strings (or lang :en))
         heading (get-in strings [:messages (keyword message)])
         message (get-in strings [:messages (keyword (str (name message) "-message"))])]
-    (render-html
-     strings
-     lang
-     :message-type type
-     :heading heading
-     :message (if (seq args)
-                (apply format message (map escape-html args))
-                (or message ""))
-     :show-form false)))
+    (render-html strings
+                 lang
+                 :message-type type
+                 :heading heading
+                 :message (if (seq args) (apply format message (map escape-html args)) (or message ""))
+                 :show-form false)))
 
 (def base-security-headers
   {"X-Content-Type-Options" "nosniff"
@@ -679,10 +614,8 @@
 
 (defn determine-language [req]
   (let [accept-language (get-in req [:headers "accept-language"] "")]
-    (cond
-      ;; Check Accept-Language header for supported languages
-      (str/includes? accept-language "fr") :fr
-      :else                                :en)))
+    (cond (str/includes? accept-language "fr") :fr
+          :else                                :en)))
 
 (defn handle-error [req e debug-info]
   (log/error "Error:" (str e))
@@ -707,7 +640,6 @@
   (let [strings     (get-ui-strings lang)
         confirm-url (create-confirmation-url token)
         from        (or (config :subscribe-smtp-from) "noreply@example.com")
-        ;; Email templates based on action
         email-templates
         {:subscribe
          {:subject   (get-in strings [:emails :subscription-confirm-subject])
@@ -717,11 +649,8 @@
          {:subject   (get-in strings [:emails :unsubscribe-confirm-subject])
           :body-text (get-in strings [:emails :unsubscribe-confirm-body-text])
           :body-html (get-in strings [:emails :unsubscribe-confirm-body-html])}}
-        ;; Select template based on action
         {:keys [subject body-text body-html]}
-        (get email-templates action
-             ;; Fallback to subscribe template if not found
-             (get email-templates :subscribe))]
+        (get email-templates action (get email-templates :subscribe))]
     (log/info (str "Sending " (name action) " confirmation email to:") email)
     (log/info "Confirmation URL:" confirm-url)
     (try
@@ -763,9 +692,8 @@
     {:already_subscribed true}
     (has-pending-confirmation? email :subscribe)
     {:confirmation_pending true}
-    ;; Not subscribed and no pending confirmation, create token and send email
     :else
-    (let [token  (create-subscription-token email)
+    (let [token  (create-token :subscribe {:email email})
           result (send-confirmation-email
                   {:email  email
                    :token  token
@@ -778,15 +706,12 @@
 (defn handle-unsubscribe-request [email lang]
   (log/info "Handling unsubscribe request for:" email)
   (cond
-    ;; Not currently subscribed
     (not (check-if-subscribed email))
     {:not_subscribed true}
-    ;; Already has pending confirmation
     (has-pending-confirmation? email :unsubscribe)
     {:confirmation_pending true}
-    ;; Subscribed and no pending confirmation, create token and send email
     :else
-    (let [token  (create-unsubscription-token email)
+    (let [token  (create-token :unsubscribe {:email email})
           result (send-confirmation-email
                   {:email  email
                    :token  token
@@ -820,8 +745,7 @@
           (log/error "Form parsing error:" (.getMessage e)))))))
 
 (defn parse-query-params [req]
-  (let [uri          (:uri req)
-        query-params (:query-params req)
+  (let [query-params (:query-params req)
         uri-params   (when-let [query (:query-string req)]
                        (when-let [token (last (re-matches #"^token=(.+)$" query))]
                          {:token token}))]
@@ -855,7 +779,7 @@
         {:status  400
          :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
          :body    (result-html lang "error" :confirmation-email-failed (:message result))}))
-    (make-response 400 "error" lang :unknown-action)))
+    (make-response 400 "error" lang :operation-failed)))
 
 (defn get-client-ip [req]
   (or (get-in req [:headers "x-forwarded-for"])
@@ -929,9 +853,7 @@
               (make-response 400 "error" lang :spam-detected))
             ;; Email validation
             (if (s/valid? ::subscription-form form-data)
-              ;; Process valid form
               (process-subscription-action lang action email)
-              ;; Handle invalid form
               (let [explain (s/explain-str ::subscription-form form-data)]
                 (log/error "Invalid form submission:" explain)
                 (make-response 400 "error" lang :invalid-email email)))))))
@@ -965,26 +887,16 @@
       (log/error "Error processing confirmation: " e)
       {:status  500
        :headers {"Content-Type" "text/html; charset=UTF-8"}
-       :body    "Something went wrong."})))
-
-(defn handle-tokens [req]
-  (let [lang      (determine-language req)
-        count-str (str (count @token-store))]
-    {:status  200
-     :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-     :body    (result-html lang "info" :tokens count-str)}))
-
-(defn handle-robots-txt []
-  {:status  200
-   :headers {"Content-Type" "text/plain; charset=UTF-8"}
-   :body    "User-agent: *\nDisallow: /"})
+       :body    (result-html :en "error" :operation-failed)})))
 
 (def routes
   [{:path "/" :method :get :response handle-index}
    {:path "/subscribe" :method :post :response handle-subscribe}
    {:path "/confirm" :method :get :response handle-confirmation}
-   {:path "/tokens" :method :get :response handle-tokens}
-   {:path "/robots.txt" :method :get :response handle-robots-txt}])
+   {:path     "/robots.txt" :method :get
+    :response {:status  200
+               :headers {"Content-Type" "text/plain; charset=UTF-8"}
+               :body    "User-agent: *\nDisallow: /"}}])
 
 (defn app [req]
   (let [uri             (:uri req)
@@ -1002,11 +914,7 @@
               {:status  404
                :headers (merge {"Content-Type" "text/html; charset=UTF-8"}
                                security-headers-self)
-               :body    (format "<h1>%s</h1><p>%s: %s %s</p>"
-                                "Not Found"
-                                "Resource not found"
-                                (name (:request-method req))
-                                uri)})))
+               :body    (result-html :en "error" :operation-failed)})))
       (catch Throwable e (handle-error req e (str "URI: " uri))))))
 
 (defn merge-ui-strings! [config-data]
@@ -1023,16 +931,15 @@
     (log/info "Using configuration file:" file-path)
     (when-let [config-data (edn/read-string (slurp file-path))]
       (if-not (validate-config config-data)
-        (System/exit 0)
+        (do (log/error "Invalid configuration data")
+            (System/exit 0))
         (do ;; Merge UI strings first to handle the nested structure
           (merge-ui-strings! config-data)
-          ;; Handle path normalization for specific fields
+          ;; Handle path normalization for specific fields - FIXME: needed?
           (let [processed-config
                 (cond-> (dissoc config-data :ui-strings)
-                  ;; Process base-path if present
                   (:base-path config-data)
                   (update :base-path normalize-path)
-                  ;; Process base-url if present
                   (:base-url config-data)
                   (update :base-url normalize-url))]
             ;; Log what we're updating
@@ -1048,7 +955,6 @@
 (defn -main [& args]
   (let [opts (cli/parse-opts args {:spec cli-options})
         port (get opts :port 8080)]
-    ;; Handle help
     (when (:help opts) (print-usage))
     ;; Update base-url with specified port when provided
     (when-let [specified-port (get opts :port)]
@@ -1067,39 +973,12 @@
       (when-let [index-content (slurp index-file)]
         (swap! app-config assoc :index-tpl index-content)
         (log/info "Loaded index template from file:" index-file)))
-    ;; Process configuration file if provided (this will override individual settings)
+    ;; Process configuration file if provided (this overrides individual settings)
     (when-let [config-path (:config opts)]
       (update-config-from-file! config-path))
-    ;; Log configuration state after all updates
-    (log/info "MAILGUN_LIST_ID=" (config :mailgun-list-id))
-    (log/info "MAILGUN_LIST_NAME=" (config :mailgun-list-name))
-    (log/info "MAILGUN_API_ENDPOINT=" (config :mailgun-api-endpoint))
-    (when (not-empty (config :base-path))
-      (log/info "SUBSCRIBE_BASE_PATH=" (config :base-path)))
-    (if (not-empty (config :mailgun-api-key))
-      (log/info "MAILGUN_API_KEY=****")
-      (do
-        (log/error "MAILGUN_API_KEY not set")
-        (System/exit 0)))
-    ;; Log SMTP configuration
-    (if (and (config :subscribe-smtp-host)
-             (config :subscribe-smtp-port)
-             (config :subscribe-smtp-user)
-             (config :subscribe-smtp-pass)
-             (config :subscribe-smtp-from))
-      (do
-        (log/info "SUBSCRIBE_SMTP_HOST=" (config :subscribe-smtp-host))
-        (log/info "SUBSCRIBE_SMTP_PORT=" (config :subscribe-smtp-port))
-        (log/info "SUBSCRIBE_SMTP_USER=" (config :subscribe-smtp-user))
-        (log/info "SUBSCRIBE_SMTP_PASS=****")
-        (log/info "SUBSCRIBE_SMTP_FROM=" (config :subscribe-smtp-from)))
-      (log/error "SMTP configuration incomplete."))
-    (if (config :base-url)
-      (log/info "SUBSCRIBE_BASE_URL=" (config :base-url))
-      (log/warn "SUBSCRIBE_BASE_URL not set, use http://localhost"))
-    ;; Log template file configurations
-    (when (config :index-tpl)
-      (log/info "Using custom index template"))
+    (when-not (config :mailgun-api-key)
+      (log/error "MAILGUN_API_KEY not set")
+      (System/exit 0))
     ;; Configure Timbre logging
     (let [appenders (merge {:println (log/println-appender {:stream :auto})}
                            (when-let [f (get opts :log-file)]
