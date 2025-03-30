@@ -661,19 +661,17 @@
      (and show-form csrf-token)
      (assoc :csrf_token csrf-token))))
 
-(defn result-html [strings type message-key & args]
-  (let [args-seq (if (seq args) (seq args) [])
-        lang     (keyword (or (first (filter keyword? args-seq)) :en))
-        heading  (get-in strings [:messages message-key])
-        message  (get-in strings [:messages (keyword (str (name message-key) "-message"))])
-        msg-args (filter string? args-seq)]
+(defn result-html [lang type message & args]
+  (let [strings (get-ui-strings (or lang :en))
+        heading (get-in strings [:messages (keyword message)])
+        message (get-in strings [:messages (keyword (str (name message) "-message"))])]
     (render-html
      strings
      lang
      :message-type type
      :heading heading
-     :message (if (seq msg-args)
-                (apply format message (map escape-html msg-args))
+     :message (if (seq args)
+                (apply format message (map escape-html args))
                 (or message ""))
      :show-form false)))
 
@@ -689,10 +687,10 @@
   (merge base-security-headers
          {"Content-Security-Policy" "default-src 'self';"}))
 
-(defn make-response [status type strings heading-key message-key & args]
+(defn make-response [status type lang message & args]
   {:status  status
    :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-   :body    (apply result-html strings type heading-key message-key args)})
+   :body    (apply result-html lang type message args)})
 
 (defn determine-language [req]
   (let [accept-language (get-in req [:headers "accept-language"] "")]
@@ -704,17 +702,10 @@
 (defn handle-error [req e debug-info]
   (log/error "Error:" (str e))
   (log/error "Stack trace:" (with-out-str (.printStackTrace e)))
-  (let [lang    (determine-language req)
-        strings (get-ui-strings lang)]
+  (let [lang (determine-language req)]
     {:status  500
      :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-     :body    (result-html
-               strings
-               "error"
-               :operation-failed
-               (get-in strings [:messages :server-error])
-               (str "Exception: " (.getMessage e) "\n\n"
-                    "Debug info:\n" debug-info))}))
+     :body    (result-html lang "error" :operation-failed debug-info)}))
 
 (defn check-if-subscribed [email]
   (log/info "Checking if email is already subscribed:" email)
@@ -783,10 +774,8 @@
 (defn handle-subscription-request [email lang]
   (log/info "Handling subscription request for:" email)
   (cond
-    ;; Already subscribed
     (check-if-subscribed email)
     {:already_subscribed true}
-    ;; Already has pending confirmation
     (has-pending-confirmation? email :subscribe)
     {:confirmation_pending true}
     ;; Not subscribed and no pending confirmation, create token and send email
@@ -799,8 +788,7 @@
                    :action :subscribe})]
       (if (:success result)
         {:confirmation_sent true}
-        {:confirmation_failed true
-         :message             (:message result)}))))
+        {:message (:message result)}))))
 
 (defn handle-unsubscribe-request [email lang]
   (log/info "Handling unsubscribe request for:" email)
@@ -821,8 +809,7 @@
                    :action :unsubscribe})]
       (if (:success result)
         {:confirmation_sent true}
-        {:confirmation_failed true
-         :message             (:message result)}))))
+        {:message (:message result)}))))
 
 (defn parse-form-data [request]
   (let [content-type (get-in request [:headers "content-type"] "")
@@ -898,46 +885,35 @@
       (log/error "Request that caused error:"
                  (pr-str (select-keys req [:uri :query-string]))))))
 
-(defn process-subscription-action [strings lang action email]
+(defn process-subscription-action [lang action email]
   (case action
     "subscribe"
     (let [result (handle-subscription-request email lang)]
       (cond
         (:already_subscribed result)
-        (make-response 200 "success" strings :already-subscribed :already-subscribed-message email)
+        (make-response 200 "success" lang :already-subscribed email)
         (:confirmation_pending result)
-        (make-response 200 "info" strings :confirmation-pending :confirmation-pending-message email)
+        (make-response 200 "info" lang :confirmation-pending email)
         (:confirmation_sent result)
-        (make-response 200 "info" strings :confirmation-sent :confirmation-sent-message email)
+        (make-response 200 "info" lang :confirmation-sent email)
         :else
         {:status  400
          :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-         :body    (result-html
-                   strings
-                   "error"
-                   :operation-failed
-                   (or (:message result) (get-in strings [:messages :server-error]))
-                   (str "Debug info:\n" (pr-str result)))}))
+         :body    (result-html lang "error" :operation-failed (:message result))}))
     "unsubscribe"
     (let [result (handle-unsubscribe-request email lang)]
       (cond
         (:not_subscribed result)
-        (make-response 200 "warning" strings :not-subscribed :not-subscribed-message email)
+        (make-response 200 "warning" lang :not-subscribed email)
         (:confirmation_pending result)
-        (make-response 200 "info" strings :confirmation-pending :confirmation-pending-message email)
+        (make-response 200 "info" lang :confirmation-pending email)
         (:confirmation_sent result)
-        (make-response 200 "info" strings :confirmation-sent :confirmation-sent-message email)
+        (make-response 200 "info" lang :confirmation-sent email)
         :else
         {:status  400
          :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-         :body    (result-html
-                   strings
-                   "error"
-                   :confirmation-email-failed
-                   (format (get-in strings [:messages :confirmation-email-failed-message]) email)
-                   (str "Debug info:\n" (pr-str result)))}))
-    ;; Default case for unknown action
-    (make-response 400 "error" strings :unknown-action :unknown-action)))
+         :body    (result-html lang "error" :confirmation-email-failed (:message result))}))
+    (make-response 400 "error" lang :unknown-action)))
 
 (defn get-client-ip [req]
   (or (get-in req [:headers "x-forwarded-for"])
@@ -989,7 +965,6 @@
           action          (or (:action form-data) "subscribe")
           client-ip       (get-client-ip req)
           lang            (determine-language req)
-          strings         (get-ui-strings lang)
           form-csrf-token (:csrf_token form-data)]
       (log/debug "Parsed form data:" (pr-str form-data))
       (log/debug "Email from form:" email)
@@ -999,51 +974,51 @@
       (if-not (validate-csrf-token form-csrf-token client-ip)
         (do
           (log/warn "CSRF token validation failed")
-          (make-response 403 "error" strings :csrf-invalid :csrf-invalid-message))
+          (make-response 403 "error" lang :csrf-invalid))
         ;; Anti-spam: rate limiting
         (if (rate-limited? client-ip)
           (do
             (log/warn "Rate limit exceeded for IP:" client-ip)
-            (make-response 429 "error" strings :rate-limit :rate-limit-message))
+            (make-response 429 "error" lang :rate-limit))
           ;; Anti-spam: honeypot check
           (if (not (str/blank? (str (:website form-data))))
             (do
               (log/warn "Spam detected: honeypot field filled from IP:" client-ip)
-              (make-response 400 "error" strings :spam-detected :spam-detected-message))
+              (make-response 400 "error" lang :spam-detected))
             ;; Email validation
             (if (s/valid? ::subscription-form form-data)
               ;; Process valid form
-              (process-subscription-action strings lang action email)
+              (process-subscription-action lang action email)
               ;; Handle invalid form
               (let [explain (s/explain-str ::subscription-form form-data)]
                 (log/error "Invalid form submission:" explain)
-                (make-response 400 "error" strings :invalid-email :invalid-email-message email)))))))
+                (make-response 400 "error" lang :invalid-email email)))))))
     (catch Throwable e
       (handle-error req e (str "Request method: " (name (:request-method req)) "\n"
                                "Headers: " (pr-str (:headers req)))))))
 
 (defn handle-confirmation [req]
   (try
-    (let [token   (-> req :query-params :token)
-          lang    (keyword (or (determine-language req) :en))
-          strings (get-ui-strings lang)]
+    (let [token (-> req :query-params :token)
+          lang  (determine-language req)]
       (log/info "Processing confirmation token: " token)
       (if (str/blank? token)
         ;; No token provided
         {:status  400
          :headers {"Content-Type" "text/html; charset=UTF-8"}
-         :body    (result-html strings "error" (get-in strings [:messages :csrf-invalid]))}
+         :body    (result-html lang "error" :csrf-invalid)}
         ;; Process token directly
         (let [result   (process-confirmation-token token)
               success? (:success result)]
           (log/info "Token processing result: " result)
           {:status  (if success? 200 400)
            :headers {"Content-Type" "text/html; charset=UTF-8"}
-           :body    (result-html strings
-                                 (if success? "success" "error")
-                                 (if success?
-                                   (keyword (str (name (:action result)) "-confirmation-success"))
-                                   :confirmation-error))})))
+           :body    (result-html
+                     lang
+                     (if success? "success" "error")
+                     (if success?
+                       (keyword (str (name (:action result)) "-confirmation-success"))
+                       :confirmation-error))})))
     (catch Exception e
       (log/error "Error processing confirmation: " e)
       {:status  500
@@ -1052,11 +1027,10 @@
 
 (defn handle-tokens [req]
   (let [lang      (determine-language req)
-        strings   (get-ui-strings lang)
         count-str (str (count @token-store))]
     {:status  200
      :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-     :body    (result-html strings "info" :tokens :tokens-message count-str)}))
+     :body    (result-html lang "info" :tokens count-str)}))
 
 (defn handle-robots-txt []
   {:status  200
@@ -1091,8 +1065,7 @@
                                 "Resource not found"
                                 (name (:request-method req))
                                 uri)})))
-      (catch Throwable e
-        (handle-error req e (str "URI: " uri))))))
+      (catch Throwable e (handle-error req e (str "URI: " uri))))))
 
 (defn merge-ui-strings! [config-data]
   (when-let [config-ui-strings (:ui-strings config-data)]
