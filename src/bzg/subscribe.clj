@@ -365,7 +365,7 @@
 (defn create-confirmation-url [token]
   (join-url (config :base-url)
             (normalize-path (config :base-path))
-            (str "confirm?token=" token)))
+            (str "confirm?token=" (java.net.URLEncoder/encode token "UTF-8"))))
 
 ;; Returns Authorization header value for Mailgun API requests
 (def get-mailgun-auth-header
@@ -730,7 +730,7 @@
   (let [query-params (:query-params req)
         uri-params   (when-let [query (:query-string req)]
                        (when-let [token (last (re-matches #"^token=(.+)$" query))]
-                         {:token token}))]
+                         {:token (java.net.URLDecoder/decode token "UTF-8")}))]
     (or query-params uri-params)))
 
 (defn process-subscription-action [lang action email]
