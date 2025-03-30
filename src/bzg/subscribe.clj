@@ -809,7 +809,7 @@
   (log/debug "Headers:" (pr-str (:headers req)))
   (try
     (let [form-data       (parse-form-data req)
-          email           (-> (:email form-data) str/trim str/lower-case)
+          email           (some-> (:email form-data) str/trim str/lower-case)
           action          (or (:action form-data) "subscribe")
           client-ip       (get-client-ip req)
           lang            (determine-language req)
@@ -818,27 +818,29 @@
       (log/debug "Email from form:" email)
       (log/debug "Action from form:" action)
       (log/debug "CSRF token from form:" form-csrf-token)
-      ;; CSRF Protection check
-      (if-not (validate-csrf-token form-csrf-token client-ip)
-        (do
-          (log/warn "CSRF token validation failed")
-          (make-response 403 "error" lang :csrf-invalid))
-        ;; Anti-spam: rate limiting
-        (if (rate-limited? client-ip)
+      (if-not email
+        (make-response 400 "error" lang :invalid-email "No email provided")
+        ;; CSRF Protection check
+        (if-not (validate-csrf-token form-csrf-token client-ip)
           (do
-            (log/warn "Rate limit exceeded for IP:" client-ip)
-            (make-response 429 "error" lang :rate-limit))
-          ;; Anti-spam: honeypot check
-          (if (not (str/blank? (str (:website form-data))))
+            (log/warn "CSRF token validation failed")
+            (make-response 403 "error" lang :csrf-invalid))
+          ;; Anti-spam: rate limiting
+          (if (rate-limited? client-ip)
             (do
-              (log/warn "Spam detected: honeypot field filled from IP:" client-ip)
-              (make-response 400 "error" lang :spam-detected))
-            ;; Email validation
-            (if (s/valid? ::subscription-form form-data)
-              (process-subscription-action lang action email)
-              (let [explain (s/explain-str ::subscription-form form-data)]
-                (log/error "Invalid form submission:" explain)
-                (make-response 400 "error" lang :invalid-email email)))))))
+              (log/warn "Rate limit exceeded for IP:" client-ip)
+              (make-response 429 "error" lang :rate-limit))
+            ;; Anti-spam: honeypot check
+            (if (not (str/blank? (str (:website form-data))))
+              (do
+                (log/warn "Spam detected: honeypot field filled from IP:" client-ip)
+                (make-response 400 "error" lang :spam-detected))
+              ;; Email validation
+              (if (s/valid? ::subscription-form form-data)
+                (process-subscription-action lang action email)
+                (let [explain (s/explain-str ::subscription-form form-data)]
+                  (log/error "Invalid form submission:" explain)
+                  (make-response 400 "error" lang :invalid-email email))))))))
     (catch Throwable e
       (handle-error req e (str "Request method: " (name (:request-method req)) "\n"
                                "Headers: " (pr-str (:headers req)))))))
