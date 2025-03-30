@@ -76,7 +76,7 @@
    (sorted-map)
    {:help      {:alias :h :desc "Display help"}
     :port      {:alias :p :desc "Port number" :default 8080 :coerce :int}
-    :base-path {:alias :b :desc "Base path" :coerce :string}
+    :base-path {:alias :b :desc "Base path" :default "/" :coerce :string}
     :base-url  {:alias :u :desc "Base URL for confirmation links (no port)" :coerce :string}
     :log-level {:alias :l :desc "Log level (debug, info, warn, error)" :default "info" :coerce :string}
     :config    {:alias :c :desc "Config file path" :coerce :string}
@@ -214,7 +214,6 @@
   (if (str/blank? path)
     ""
     (-> path str/trim
-        (str/replace #"/{2,}" "/")
         (as-> p (if (str/starts-with? p "/") p (str "/" p)))
         (str/replace #"/$" ""))))
 
@@ -325,11 +324,11 @@
      :confirmation-email-failed-message        "<p>Nous n'avons pas pu envoyer un email de confirmation à <code>%s</code>.</p><p>Veuillez réessayer plus tard.</p>"}
     :emails
     {:subscription-confirm-subject   "[%s] Veuillez confirmer votre abonnement"
-     :subscription-confirm-body-text "Merci de vous être abonné à notre liste de diffusion avec votre adresse e-mail : %s.\n\nVeuillez confirmer votre abonnement en cliquant sur le lien suivant :\n\n%s\n\nSi vous n'avez pas demandé cet abonnement, vous pouvez ignorer cet e-mail."
-     :subscription-confirm-body-html "<html><body><p>Merci de vous être abonné à notre liste de diffusion avec votre adresse e-mail : <code>%s</code>.</p><p>Veuillez confirmer votre abonnement en cliquant sur le lien suivant :</p><p><a href=\"%s\">Confirmer votre abonnement</a></p><p>Si vous n'avez pas demandé cet abonnement, vous pouvez ignorer cet e-mail.</p></body></html>"
+     :subscription-confirm-body-text "Merci de vous être abonné à notre liste de diffusion avec votre adresse e-mail : %s.\n\nVeuillez confirmer votre abonnement en cliquant sur le lien suivant :\n\n%s\n\nSi vous n'avez pas demandé cet abonnement, vous pouvez ignorer cet e-mail."
+     :subscription-confirm-body-html "<html><body><p>Merci de vous être abonné à notre liste de diffusion avec votre adresse e-mail : <code>%s</code>.</p><p>Veuillez confirmer votre abonnement en cliquant sur le lien suivant :</p><p><a href=\"%s\">Confirmer votre abonnement</a></p><p>Si vous n'avez pas demandé cet abonnement, vous pouvez ignorer cet e-mail.</p></body></html>"
      :unsubscribe-confirm-subject    "[%s] Veuillez confirmer votre désabonnement"
-     :unsubscribe-confirm-body-text  "Vous avez demandé à vous désabonner de notre liste de diffusion avec l'adresse e-mail : %s.\n\nVeuillez confirmer votre désabonnement en cliquant sur le lien suivant :\n\n%s\n\nSi vous n'avez pas demandé ce désabonnement, vous pouvez ignorer cet e-mail."
-     :unsubscribe-confirm-body-html  "<html><body><p>Vous avez demandé à vous désabonner de notre liste de diffusion avec l'adresse e-mail : <code>%s</code>.</p><p>Veuillez confirmer votre désabonnement en cliquant sur le lien suivant :</p><p><a href=\"%s\">Confirmer votre désabonnement</a></p><p>Si vous n'avez pas demandé ce désabonnement, vous pouvez ignorer cet e-mail.</p></body></html>"}}})
+     :unsubscribe-confirm-body-text  "Vous avez demandé à vous désabonner de notre liste de diffusion avec l'adresse e-mail : %s.\n\nVeuillez confirmer votre désabonnement en cliquant sur le lien suivant :\n\n%s\n\nSi vous n'avez pas demandé ce désabonnement, vous pouvez ignorer cet e-mail."
+     :unsubscribe-confirm-body-html  "<html><body><p>Vous avez demandé à vous désabonner de notre liste de diffusion avec l'adresse e-mail : <code>%s</code>.</p><p>Veuillez confirmer votre désabonnement en cliquant sur le lien suivant :</p><p><a href=\"%s\">Confirmer votre désabonnement</a></p><p>Si vous n'avez pas demandé ce désabonnement, vous pouvez ignorer cet e-mail.</p></body></html>"}}})
 
 (def app-config
   (atom {:mailgun-list-id      (System/getenv "MAILGUN_LIST_ID")
@@ -364,9 +363,9 @@
   (apply with-base-path segments))
 
 (defn create-confirmation-url [token]
-  (str
-   (join-url (config :base-url) (normalize-path (config :base-path)))
-   "confirm?token=" token))
+  (join-url (config :base-url)
+            (normalize-path (config :base-path))
+            (str "confirm?token=" token)))
 
 ;; Returns Authorization header value for Mailgun API requests
 (def get-mailgun-auth-header
