@@ -273,20 +273,6 @@
           path-part       (apply join-paths path-segments)]
       (str normalized-base path-part))))
 
-(defn create-url-with-query [base-url path query-params]
-  (let [url          (join-url base-url path)
-        query-string (when (seq query-params)
-                       (->> query-params
-                            (map (fn [[k v]]
-                                   ;; Special handling for token to avoid double-encoding
-                                   (if (= k :token)
-                                     (str (name k) "=" v)
-                                     (str (name k) "=" (java.net.URLEncoder/encode (str v) "UTF-8")))))
-                            (str/join "&")))]
-    (if (seq query-string)
-      (str url "?" query-string)
-      url)))
-
 (defn generate-default-base-url [port]
   (let [port-str     (str port)
         default-base (or (System/getenv "SUBSCRIBE_BASE_URL")
@@ -430,10 +416,9 @@
   (apply with-base-path segments))
 
 (defn create-confirmation-url [token]
-  (create-url-with-query
+  (str
    (join-url (config :base-url) (normalize-path (config :base-path)))
-   "/confirm"
-   {:token token}))
+   "confirm?token=" token))
 
 ;; Returns Authorization header value for Mailgun API requests
 (def get-mailgun-auth-header
@@ -834,56 +819,13 @@
         (catch Exception e
           (log/error "Form parsing error:" (.getMessage e)))))))
 
-(defn parse-query-params-0 [uri]
-  (try
-    (when (and (not-empty uri) (str/includes? uri "?"))
-      (when-let [query-string (second (str/split uri #"\?"))]
-        (log/debug "Query string:" query-string)
-        (reduce (fn [acc pair]
-                  (if (str/blank? pair)
-                    acc
-                    (try
-                      (let [parts (str/split pair #"=" 2)
-                            k     (first parts)
-                            v     (if (> (count parts) 1) (second parts) "")]
-                        (when (not (str/blank? k))
-                          (let [decoded-k (java.net.URLDecoder/decode k "UTF-8")
-                                decoded-v (if (not (str/blank? v))
-                                            (java.net.URLDecoder/decode v "UTF-8")
-                                            "")]
-                            (log/debug "Decoded param:" decoded-k "=" decoded-v)
-                            (assoc acc (keyword decoded-k) decoded-v))))
-                      (catch Throwable t
-                        (log/error "Error parsing param pair:" pair ":" (str t))
-                        acc))))
-                {}
-                (str/split query-string #"&"))))
-    (catch Throwable t
-      (log/error "Error parsing query params:" t)
-      (log/error "URI that caused error:" uri))))
-
 (defn parse-query-params [req]
-  (try
-    (let [existing-params (:query-params req)
-          uri             (get req :uri "")
-          uri-params      (parse-query-params-0 uri)]
-      (log/debug "Existing params in request:" (pr-str existing-params))
-      (log/debug "URI-parsed params:" (pr-str uri-params))
-      (cond
-        ;; Use existing params if available
-        (and (map? existing-params) (not-empty existing-params))
-        existing-params
-        ;; Next try URI params
-        (and (map? uri-params) (not-empty uri-params))
-        uri-params
-        ;; Finally, try to extract from query-string directly
-        :else
-        (when-let [query-string (not-empty (get req :query-string))]
-          (parse-query-params-0 (str "?" query-string)))))
-    (catch Throwable t
-      (log/error "Error in enhanced param parsing:" t)
-      (log/error "Request that caused error:"
-                 (pr-str (select-keys req [:uri :query-string]))))))
+  (let [uri          (:uri req)
+        query-params (:query-params req)
+        uri-params   (when-let [query (:query-string req)]
+                       (when-let [token (last (re-matches #"^token=(.+)$" query))]
+                         {:token token}))]
+    (or query-params uri-params)))
 
 (defn process-subscription-action [lang action email]
   (case action
