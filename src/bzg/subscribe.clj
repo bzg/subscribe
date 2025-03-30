@@ -308,7 +308,6 @@
      :unsubscribe-button "Unsubscribe"}
     :messages
     {:back-to-subscription                     "Back to subscription"
-     :thank-you                                "Thank you!"
      :already-subscribed                       "Already subscribed"
      :already-subscribed-message               "The email <code>%s</code> is already subscribed."
      :not-subscribed                           "Warning: not subscribed"
@@ -316,6 +315,7 @@
      :confirmation-pending                     "Confirmation pending"
      :confirmation-pending-message             "<p>A confirmation email has already been sent to <code>%s</code>.</p><p>Please check your inbox or spam folder for the confirmation link.<p>"
      :operation-failed                         "Operation failed"
+     :operation-failed-message                 "The operation was unsuccessful, please try again."
      :rate-limit                               "Rate limit exceeded"
      :rate-limit-message                       "Too many subscription attempts from your IP address. Please try again later."
      :invalid-email                            "Invalid email format"
@@ -332,6 +332,7 @@
      :subscribe-confirmation-success-message   "Your subscription has been confirmed. Thank you!"
      :unsubscribe-confirmation-success         "Bye!"
      :unsubscribe-confirmation-success-message "Your unsubscription has been confirmed."
+     :confirmation-error                       "Confirmation error"
      :confirmation-error-message               "The confirmation link is invalid or has expired. Please try subscribing again."
      :confirmation-email-failed                "Confirmation email could not be sent"
      :confirmation-email-failed-message        "<p>We couldn't send a confirmation email to <code>%s</code>.</p><p>Please try again later.<p>"
@@ -357,7 +358,6 @@
      :unsubscribe-button "Désabonnement"}
     :messages
     {:back-to-subscription                     "Retour à l'accueil"
-     :thank-you                                "Merci !"
      :already-subscribed                       "Déjà abonné"
      :already-subscribed-message               "L'adresse e-mail <code>%s</code> est déjà abonnée."
      :not-subscribed                           "Attention : non abonné"
@@ -365,6 +365,7 @@
      :confirmation-pending                     "Confirmation en attente"
      :confirmation-pending-message             "<p>Un email de confirmation a déjà été envoyé à <code>%s</code>.</p><p>Veuillez vérifier votre boîte de réception ou dossier spam pour le lien de confirmation.<p>"
      :operation-failed                         "Échec de l'opération"
+     :operation-failed-message                 "<p>L'opération n'a pas pu aboutir avec cette erreur:</p><p><code>%s</code>."
      :rate-limit                               "Limite de taux dépassée"
      :rate-limit-message                       "Trop de tentatives d'abonnement depuis votre adresse IP. Veuillez réessayer plus tard."
      :invalid-email                            "Format d'e-mail invalide"
@@ -381,6 +382,7 @@
      :subscribe-confirmation-success-message   "Votre abonnement a été confirmé."
      :unsubscribe-confirmation-success         "Au revoir !"
      :unsubscribe-confirmation-success-message "Votre désabonnement est confirmé."
+     :confirmation-error                       "Erreur de confirmation"
      :confirmation-error-message               "<p>Le lien de confirmation n'est pas valide ou a expiré.<p/><p>Veuillez essayer de vous abonner à nouveau.</p>"
      :confirmation-email-failed                "L'email de confirmation n'a pas pu être envoyé."
      :confirmation-email-failed-message        "<p>Nous n'avons pas pu envoyer un email de confirmation à <code>%s</code>.</p><p>Veuillez réessayer plus tard.</p>"
