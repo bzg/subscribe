@@ -406,15 +406,19 @@
     (when (zero? (mod new-count 10))
       (log/info (format "%d new subscriptions" new-count)))))
 
-(defn subscribe-to-mailgun [email]
-  (log/info "Subscribing email to Mailgun:" email)
-  (let [url         (format "%s/lists/%s/members"
-                            (config :mailgun-api-endpoint)
-                            (config :mailgun-list-id))
-        body-params (format "address=%s&subscribed=yes&upsert=yes"
-                            (java.net.URLEncoder/encode email "UTF-8"))
-        _           (log/debug "Making request to Mailgun API:" url body-params)
-        response    (make-mailgun-request :post url body-params)]
+(defn manage-mailgun-subscription [action email]
+  (log/info (if (= action :subscribe) "Subscribing" "Unsubscribing") "email:" email)
+  (let [[method url body-params]
+        (case action
+          :subscribe   [:post
+                        (format "%s/lists/%s/members"
+                                (config :mailgun-api-endpoint)
+                                (config :mailgun-list-id))
+                        (format "address=%s&subscribed=yes&upsert=yes"
+                                (java.net.URLEncoder/encode email "UTF-8"))]
+          :unsubscribe [:delete (get-mailgun-member-url email) nil])
+        _        (log/debug "Making" (name method) "request to Mailgun API:" url (when body-params body-params))
+        response (make-mailgun-request method url body-params)]
     (log/debug "Mailgun API response status:" (:status response))
     (log/debug "Mailgun API response body:" (:body response))
     (cond
@@ -423,35 +427,14 @@
        :message "Connection error. Please try again later."
        :debug   response}
       (< (:status response) 300)
-      (do (warn-new-subscription!)
-          (log/info "Successfully subscribed email:" email)
-          {:success true})
-      :else
       (do
-        (log/error "Failed to subscribe email:" email "- Status:" (:status response))
-        (log/error "Error response:" (:body response))
-        {:success false
-         :message "Failed to subscribe. Please try again later."
-         :debug   {:status (:status response)
-                   :body   (:body response)}}))))
-
-(defn unsubscribe-from-mailgun [email]
-  (log/info "Attempting to unsubscribe email:" email)
-  (let [url      (get-mailgun-member-url email)
-        _        (log/debug "Making DELETE request to Mailgun API:" url)
-        response (make-mailgun-request :delete url nil)]
-    (log/debug "Mailgun API unsubscribe response status:" (:status response))
-    (log/debug "Mailgun API unsubscribe response body:" (:body response))
-    (cond
-      (:error response)
-      {:success false
-       :message "Connection error. Please try again later."
-       :debug   response}
-      (< (:status response) 300)
-      (do
-        (log/info "Successfully unsubscribed email:" email)
+        (when (= action :subscribe)
+          (warn-new-subscription!)
+          (log/info "Successfully subscribed email:" email))
+        (when (= action :unsubscribe)
+          (log/info "Successfully unsubscribed email:" email))
         {:success true})
-      (= (:status response) 404)
+      (and (= action :unsubscribe) (= (:status response) 404))
       (do
         (log/info "Email not found for unsubscription:" email)
         {:success   false
@@ -459,10 +442,10 @@
          :message   "Email address not found in subscription list."})
       :else
       (do
-        (log/error "Failed to unsubscribe email:" email "- Status:" (:status response))
+        (log/error "Failed to" (name action) "email:" email "- Status:" (:status response))
         (log/error "Error response:" (:body response))
         {:success false
-         :message "Failed to unsubscribe. Please try again later."
+         :message (str "Failed to " (name action) ". Please try again later.")
          :debug   {:status (:status response)
                    :body   (:body response)}}))))
 
@@ -473,7 +456,7 @@
           consume-token #(when-let [token-data (validate-token % :consume true) (:data token-data)])]
       (case token-type
         :subscribe
-        (let [result (subscribe-to-mailgun email)]
+        (let [result (manage-mailgun-subscription :subscribe email)]
           (when (:success result)
             (consume-token token-key))
           (assoc result
@@ -481,7 +464,7 @@
                  :action :subscribe
                  :confirm-type :subscribe-confirmation-success))
         :unsubscribe
-        (let [result (unsubscribe-from-mailgun email)]
+        (let [result (manage-mailgun-subscription :unsubscribe email)]
           (when (:success result)
             (consume-token token-key))
           (assoc result
