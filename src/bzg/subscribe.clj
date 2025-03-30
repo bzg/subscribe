@@ -76,7 +76,7 @@
    (sorted-map)
    {:help      {:alias :h :desc "Display help"}
     :port      {:alias :p :desc "Port number" :default 8080 :coerce :int}
-    :base-path {:alias :b :desc "Base path" :default "/" :coerce :string}
+    :base-path {:alias :b :desc "Base path" :coerce :string}
     :base-url  {:alias :u :desc "Base URL for confirmation links (no port)" :coerce :string}
     :log-level {:alias :l :desc "Log level (debug, info, warn, error)" :default "info" :coerce :string}
     :config    {:alias :c :desc "Config file path" :coerce :string}
@@ -249,7 +249,7 @@
      :subscribe-button   "Subscribe"
      :unsubscribe-button "Unsubscribe"}
     :messages
-    {:back-to-subscription                     "Back to subscription"
+    {:back-to-homepage                         "Back"
      :already-subscribed                       "Already subscribed"
      :already-subscribed-message               "The email <code>%s</code> is already subscribed."
      :not-subscribed                           "Warning: not subscribed"
@@ -295,7 +295,7 @@
      :subscribe-button   "Abonnement"
      :unsubscribe-button "Désabonnement"}
     :messages
-    {:back-to-subscription                     "Retour à l'accueil"
+    {:back-to-homepage                         "Accueil"
      :already-subscribed                       "Déjà abonné"
      :already-subscribed-message               "L'adresse e-mail <code>%s</code> est déjà abonnée."
      :not-subscribed                           "Attention : non abonné"
@@ -505,7 +505,7 @@
       <p>{{message|safe}}</p>
       <br/>
       <div style=\"text-align: center;\">
-        <a href=\"{{base-path}}\" class=\"secondary\" role=\"button\">{{messages.back-to-subscription}}</a>
+        <a href=\"{{base-path}}\" class=\"secondary\" role=\"button\">{{messages.back-to-homepage}}</a>
       </div>
     </article>
     <footer class=\"footer\">{{page.footer|safe}}</footer>
@@ -940,8 +940,7 @@
     (when (:help opts) (print-usage))
     ;; Update base-url with specified port when provided
     (when-let [specified-port (get opts :port)]
-      (swap! app-config assoc :base-url (generate-default-base-url specified-port))
-      (log/info "Setting base-url with specified port:" specified-port))
+      (swap! app-config assoc :base-url (generate-default-base-url specified-port)))
     ;; Set base-url from command line if provided
     (when-let [conf-url (:base-url opts)]
       (swap! app-config assoc :base-url conf-url)
