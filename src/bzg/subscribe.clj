@@ -435,7 +435,7 @@
         {:success true})
       (and (= action :unsubscribe) (= (:status response) 404))
       (do
-        (log/info "Email not found for unsubscription:" email)
+        (log/debug "Email not found for unsubscription:" email)
         {:success   false
          :not_found true
          :message   "Email address not found in subscription list."})
@@ -608,7 +608,7 @@
      :body    (result-html lang "error" :operation-failed debug-info)}))
 
 (defn check-if-subscribed [email]
-  (log/info "Checking if email is already subscribed:" email)
+  (log/debug "Checking if email is already subscribed:" email)
   (let [url      (get-mailgun-member-url email)
         _        (log/debug "Making request to check subscription status:" url)
         response (make-mailgun-request :get url nil)]
@@ -634,7 +634,7 @@
         {:keys [subject body-text body-html]}
         (get email-templates action (get email-templates :subscribe))]
     (log/info (str "Sending " (name action) " confirmation email to:") email)
-    (log/info "Confirmation URL:" confirm-url)
+    (log/debug "Confirmation URL:" confirm-url)
     (try
       (let [smtp-host (config :subscribe-smtp-host)
             smtp-port (config :subscribe-smtp-port)
@@ -849,7 +849,7 @@
   (try
     (let [token (-> req :query-params :token)
           lang  (determine-language req)]
-      (log/info "Processing confirmation token: " token)
+      (log/debug "Processing confirmation token: " token)
       (if (str/blank? token)
         ;; No token provided
         {:status  400
@@ -858,7 +858,7 @@
         ;; Process token directly
         (let [result   (process-confirmation-token token)
               success? (:success result)]
-          (log/info "Token processing result: " result)
+          (log/debug "Token processing result: " result)
           {:status  (if success? 200 400)
            :headers {"Content-Type" "text/html; charset=UTF-8"}
            :body    (result-html
