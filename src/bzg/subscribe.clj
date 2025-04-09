@@ -934,7 +934,11 @@
           ;; Load templates from files specified in config
           (when-let [index-file (:index-tpl config-data)]
             (when-let [index-content (slurp index-file)]
-              (swap! app-config assoc :index-tpl index-content))))))))
+              (swap! app-config assoc :index-tpl index-content)))
+          ;; Update logging configuration if log-file is specified
+          (when-let [log-file (:log-file config-data)]
+            (log/merge-config!
+             {:appenders {:spit (log/spit-appender {:fname log-file})}})))))))
 
 (defn -main [& args]
   (let [opts (cli/parse-opts args {:spec cli-options})
