@@ -174,7 +174,10 @@
   (let [token-key  (generate-token-key)
         now        (System/currentTimeMillis)
         expiration (get token-expirations token-type (* 24 60 60 1000))
-        token-data {:type token-type :data data :created-at now :expires-at (+ now expiration)}]
+        token-data {:type       token-type
+                    :data       data
+                    :created-at now
+                    :expires-at (+ now expiration)}]
     (swap! token-store assoc token-key token-data)
     (log/debug "Created token:" token-key "of type" token-type)
     token-key))
@@ -324,11 +327,11 @@
      :confirmation-email-failed-message        "<p>Nous n'avons pas pu envoyer un email de confirmation à <code>%s</code>.</p><p>Veuillez réessayer plus tard.</p>"}
     :emails
     {:subscription-confirm-subject   "[%s] Veuillez confirmer votre abonnement"
-     :subscription-confirm-body-text "Merci de vous être abonné à notre liste de diffusion avec votre adresse e-mail : %s.\n\nVeuillez confirmer votre abonnement en cliquant sur le lien suivant :\n\n%s\n\nSi vous n'avez pas demandé cet abonnement, vous pouvez ignorer cet e-mail."
-     :subscription-confirm-body-html "<html><body><p>Merci de vous être abonné à notre liste de diffusion avec votre adresse e-mail : <code>%s</code>.</p><p>Veuillez confirmer votre abonnement en cliquant sur le lien suivant :</p><p><a href=\"%s\">Confirmer votre abonnement</a></p><p>Si vous n'avez pas demandé cet abonnement, vous pouvez ignorer cet e-mail.</p></body></html>"
+     :subscription-confirm-body-text "Merci de vous être abonné à notre liste de diffusion avec votre adresse e-mail : %s.\n\nVeuillez confirmer votre abonnement en cliquant sur ce lien :\n\n%s\n\nSi vous n'avez pas demandé cet abonnement, vous pouvez ignorer cet e-mail."
+     :subscription-confirm-body-html "<html><body><p>Merci de vous être abonné à notre liste de diffusion avec votre adresse e-mail : <code>%s</code>.</p><p>Veuillez confirmer votre abonnement en cliquant sur ce lien :</p><p><a href=\"%s\">Confirmer votre abonnement</a></p><p>Si vous n'avez pas demandé cet abonnement, vous pouvez ignorer cet e-mail.</p></body></html>"
      :unsubscribe-confirm-subject    "[%s] Veuillez confirmer votre désabonnement"
-     :unsubscribe-confirm-body-text  "Vous avez demandé à vous désabonner de notre liste de diffusion avec l'adresse e-mail : %s.\n\nVeuillez confirmer votre désabonnement en cliquant sur le lien suivant :\n\n%s\n\nSi vous n'avez pas demandé ce désabonnement, vous pouvez ignorer cet e-mail."
-     :unsubscribe-confirm-body-html  "<html><body><p>Vous avez demandé à vous désabonner de notre liste de diffusion avec l'adresse e-mail : <code>%s</code>.</p><p>Veuillez confirmer votre désabonnement en cliquant sur le lien suivant :</p><p><a href=\"%s\">Confirmer votre désabonnement</a></p><p>Si vous n'avez pas demandé ce désabonnement, vous pouvez ignorer cet e-mail.</p></body></html>"}}})
+     :unsubscribe-confirm-body-text  "Vous avez demandé à vous désabonner de notre liste de diffusion avec l'adresse e-mail : %s.\n\nVeuillez confirmer votre désabonnement en cliquant sur ce lien :\n\n%s\n\nSi vous n'avez pas demandé ce désabonnement, vous pouvez ignorer cet e-mail."
+     :unsubscribe-confirm-body-html  "<html><body><p>Vous avez demandé à vous désabonner de notre liste de diffusion avec l'adresse e-mail : <code>%s</code>.</p><p>Veuillez confirmer votre désabonnement en cliquant sur ce lien :</p><p><a href=\"%s\">Confirmer votre désabonnement</a></p><p>Si vous n'avez pas demandé ce désabonnement, vous pouvez ignorer cet e-mail.</p></body></html>"}}})
 
 (def app-config
   (atom {:mailgun-list-id      (System/getenv "MAILGUN_LIST_ID")
