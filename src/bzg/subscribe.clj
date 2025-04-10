@@ -455,7 +455,8 @@
   (if-let [token-data (validate-token token-key)]
     (let [token-type    (:type token-data)
           email         (get-in token-data [:data :email])
-          consume-token #(when-let [token-data (validate-token % :consume true) (:data token-data)])]
+          consume-token #(when-let [token-data (validate-token % :consume true)]
+                           (:data token-data))]
       (case token-type
         :subscribe
         (let [result (manage-mailgun-subscription :subscribe email)]
