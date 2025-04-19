@@ -160,11 +160,6 @@
   (or (s/valid? ::config config-data)
       (log/error "Invalid configuration:" (s/explain-str ::config config-data))))
 
-(def token-expirations
-  {:csrf        (* 8 60 60 1000) ;; 8 hours for CSRF tokens
-   :subscribe   (* 24 60 60 1000) ;; 24 hours for subscription confirmations
-   :unsubscribe (* 24 60 60 1000)}) ;; 24 hours for unsubscription confirmations
-
 (defn generate-token-key []
   (let [random-bytes (byte-array 32)]
     (.nextBytes (java.security.SecureRandom.) random-bytes)
@@ -173,11 +168,10 @@
 (defn create-token [token-type data]
   (let [token-key  (generate-token-key)
         now        (System/currentTimeMillis)
-        expiration (get token-expirations token-type (* 24 60 60 1000))
         token-data {:type       token-type
                     :data       data
                     :created-at now
-                    :expires-at (+ now expiration)}]
+                    :expires-at (+ now (* 60 60 1000))}] ;; Expire after 1 hour
     (swap! token-store assoc token-key token-data)
     (log/debug "Created token:" token-key "of type" token-type)
     token-key))
