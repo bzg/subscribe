@@ -195,17 +195,22 @@
           @token-store)))
 
 (defn get-or-create-csrf-token [ip]
-  (let [existing-tokens (filter (fn [[_ data]]
+  (let [now (System/currentTimeMillis)
+        existing-tokens (filter (fn [[_ data]]
                                   (and (= (:type data) :csrf)
-                                       (= (get-in data [:data :ip]) ip)))
+                                       (< now (:expires-at data))))
                                 @token-store)]
     (if (seq existing-tokens)
       (first (keys existing-tokens))
-      (create-token :csrf {:ip ip}))))
+      (create-token :csrf {}))))
 
 (defn validate-csrf-token [token-key ip]
-  (when-let [token-data (validate-token token-key :token-type :csrf)]
-    (= (get-in token-data [:data :ip]) ip)))
+  (when (string? token-key)
+    (let [token-data (get @token-store token-key)
+          now        (System/currentTimeMillis)]
+      (and token-data
+           (= (:type token-data) :csrf)
+           (< now (:expires-at token-data))))))
 
 (defn normalize-path [path]
   (if (str/blank? path)
