@@ -81,7 +81,6 @@
     :log-level {:alias :l :desc "Log level (debug, info, warn, error)" :default "info" :coerce :string}
     :config    {:alias :c :desc "Config file path" :coerce :string}
     :log-file  {:alias :L :desc "Log file" :coerce :string}
-    :css-file  {:alias :S :desc "CSS file path" :coerce :string}
     :index-tpl {:alias :I :desc "Index HTML template file path" :coerce :string}}))
 
 (defn print-usage []
@@ -107,7 +106,6 @@
   (println "  subscribe -c config.edn     # Load configuration from file")
   (println "  subscribe -b /app           # Set base path to /app")
   (println "  subscribe -u https://z.org  # Set confirmation URL")
-  (println "  subscribe -S style.css      # Load CSS from file")
   (println "  subscribe -I index.html     # Load index template from file")
   (System/exit 0))
 
@@ -130,7 +128,6 @@
 (s/def ::mailgun-list-id (s/and string? #(not (re-find #"\s" %))))
 (s/def ::mailgun-api-endpoint (s/and string? #(not (re-find #"\s" %))))
 (s/def ::base-path string?)
-(s/def ::css-file string?)
 (s/def ::index-tpl string?)
 (s/def ::smtp-config
   (s/keys :req [::subscribe-smtp-host ::subscribe-smtp-port
@@ -144,7 +141,6 @@
                    ::mailgun-api-endpoint
                    ::base-path
                    ::base-url
-                   ::css-file
                    ::index-tpl]
           :opt [::smtp-config]))
 
