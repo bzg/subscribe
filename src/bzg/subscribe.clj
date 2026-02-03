@@ -161,7 +161,17 @@
     (.nextBytes (java.security.SecureRandom.) random-bytes)
     (.encodeToString (java.util.Base64/getUrlEncoder) random-bytes)))
 
+(defn prune-expired-tokens
+  "Remove expired tokens from the token store to prevent memory growth."
+  []
+  (let [now (System/currentTimeMillis)]
+    (swap! token-store
+           (fn [store]
+             (into {} (filter (fn [[_ data]] (> (:expires-at data) now)) store))))))
+
 (defn create-token [token-type data]
+  (when (> (count @token-store) 10000)
+    (prune-expired-tokens))
   (let [token-key  (generate-token-key)
         now        (System/currentTimeMillis)
         token-data {:type       token-type
@@ -192,21 +202,31 @@
 
 (defn get-or-create-csrf-token [ip]
   (let [now (System/currentTimeMillis)
-        existing-tokens (filter (fn [[_ data]]
-                                  (and (= (:type data) :csrf)
-                                       (< now (:expires-at data))))
-                                @token-store)]
-    (if (seq existing-tokens)
-      (first (keys existing-tokens))
-      (create-token :csrf {}))))
+        existing-token (some (fn [[k data]]
+                               (and (= (:type data) :csrf)
+                                    (= (get-in data [:data :ip]) ip)
+                                    (> (:expires-at data) now)
+                                    k))
+                             @token-store)]
+    (or existing-token
+        (create-token :csrf {:ip ip}))))
 
-(defn validate-csrf-token [token-key ip]
-  (when (string? token-key)
+(defn validate-csrf-token
+  "Validate a CSRF token for the given IP address.
+   Optionally consume (delete) the token after successful validation to prevent replay attacks."
+  [token-key ip & {:keys [consume] :or {consume false}}]
+  (when (and (string? token-key)
+             (not (str/blank? token-key))
+             (not (str/blank? ip)))
     (let [token-data (get @token-store token-key)
-          now        (System/currentTimeMillis)]
-      (and token-data
-           (= (:type token-data) :csrf)
-           (< now (:expires-at token-data))))))
+          now        (System/currentTimeMillis)
+          valid?     (and token-data
+                          (= (:type token-data) :csrf)
+                          (= (get-in token-data [:data :ip]) ip)
+                          (> (:expires-at token-data) now))]
+      (when (and valid? consume)
+        (swap! token-store dissoc token-key))
+      valid?)))
 
 (defn normalize-path [path]
   (if (str/blank? path)
@@ -447,24 +467,20 @@
                    :body   (:body response)}}))))
 
 (defn process-confirmation-token [token-key]
-  (if-let [token-data (validate-token token-key)]
+  ;; Consume the token atomically during validation to prevent race conditions
+  ;; where two simultaneous requests could both pass validation
+  (if-let [token-data (validate-token token-key :consume true)]
     (let [token-type    (:type token-data)
-          email         (get-in token-data [:data :email])
-          consume-token #(when-let [token-data (validate-token % :consume true)]
-                           (:data token-data))]
+          email         (get-in token-data [:data :email])]
       (case token-type
         :subscribe
         (let [result (manage-mailgun-subscription :subscribe email)]
-          (when (:success result)
-            (consume-token token-key))
           (assoc result
                  :email email
                  :action :subscribe
                  :confirm-type :subscribe-confirmation-success))
         :unsubscribe
         (let [result (manage-mailgun-subscription :unsubscribe email)]
-          (when (:success result)
-            (consume-token token-key))
           (assoc result
                  :email email
                  :action :unsubscribe
@@ -819,8 +835,8 @@
       (log/debug "CSRF token from form:" form-csrf-token)
       (if-not email
         (make-response 400 "error" lang :invalid-email "No email provided")
-        ;; CSRF Protection check
-        (if-not (validate-csrf-token form-csrf-token client-ip)
+        ;; CSRF Protection check - consume token to prevent replay attacks
+        (if-not (validate-csrf-token form-csrf-token client-ip :consume true)
           (do
             (log/warn "CSRF token validation failed")
             (make-response 403 "error" lang :csrf-invalid))
