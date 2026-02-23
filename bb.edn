@@ -1,1 +1,2 @@
-{:src "src/bzg"}
+{:src "src/bzg"
+ :bbin/bin "subscribe"}
