@@ -368,17 +368,14 @@
 (defn get-ui-strings [& [lang]]
   (get (config :ui-strings) (or lang :en)))
 
-(defn with-base-path [& path-segments]
+(defn make-path [& segments]
   (let [base-path       (config :base-path)
         normalized-base (normalize-path base-path)
-        path-part       (apply join-paths path-segments)]
+        path-part       (apply join-paths segments)]
     (cond
       (str/blank? normalized-base) path-part
       (= path-part "/")            normalized-base
       :else                        (join-paths normalized-base path-part))))
-
-(defn make-path [& segments]
-  (apply with-base-path segments))
 
 (defn create-confirmation-url [token]
   (join-url (config :base-url)
@@ -388,11 +385,10 @@
 ;; Returns Authorization header value for Mailgun API requests
 (def get-mailgun-auth-header
   (memoize
-   #(let [auth-string  (str "api:" (config :mailgun-api-key))
-          auth-bytes   (.getBytes auth-string)
-          encoder      (java.util.Base64/getEncoder)
-          encoded-auth (.encodeToString encoder auth-bytes)]
-      (str "Basic " encoded-auth))))
+   (fn [api-key]
+     (let [auth-bytes (.getBytes (str "api:" api-key))
+           encoded    (.encodeToString (java.util.Base64/getEncoder) auth-bytes)]
+       (str "Basic " encoded)))))
 
 (defn get-mailgun-member-url [email]
   (format "%s/lists/%s/members/%s"
@@ -401,7 +397,7 @@
           (java.net.URLEncoder/encode email "UTF-8")))
 
 (defn make-mailgun-request [method url body-params]
-  (let [auth-header  (get-mailgun-auth-header)
+  (let [auth-header  (get-mailgun-auth-header (config :mailgun-api-key))
         request-opts (cond-> {:headers {"Authorization" auth-header} :throw false}
                        body-params
                        (assoc :headers {"Authorization" auth-header
@@ -470,21 +466,13 @@
   ;; Consume the token atomically during validation to prevent race conditions
   ;; where two simultaneous requests could both pass validation
   (if-let [token-data (validate-token token-key :consume true)]
-    (let [token-type    (:type token-data)
-          email         (get-in token-data [:data :email])]
-      (case token-type
-        :subscribe
-        (let [result (manage-mailgun-subscription :subscribe email)]
-          (assoc result
-                 :email email
-                 :action :subscribe
-                 :confirm-type :subscribe-confirmation-success))
-        :unsubscribe
-        (let [result (manage-mailgun-subscription :unsubscribe email)]
-          (assoc result
-                 :email email
-                 :action :unsubscribe
-                 :confirm-type :unsubscribe-confirmation-success))
+    (let [action (:type token-data)
+          email  (get-in token-data [:data :email])]
+      (if (#{:subscribe :unsubscribe} action)
+        (assoc (manage-mailgun-subscription action email)
+               :email email
+               :action action
+               :confirm-type (keyword (str (name action) "-confirmation-success")))
         {:success false :invalid_token true :message "Unknown token type"}))
     {:success false :invalid_token true :message "Invalid or expired token"}))
 
@@ -598,7 +586,7 @@
 
 (def security-headers
   (merge base-security-headers
-         {"Content-Security-Policy" "default-src 'self';script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;img-src 'self' data: https://cdn.jsdelivr.net;font-src 'self' https://cdn.jsdelivr.net;"}))
+         {"Content-Security-Policy" "default-src 'self';script-src 'self' https://cdn.jsdelivr.net;style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;img-src 'self' data: https://cdn.jsdelivr.net;font-src 'self' https://cdn.jsdelivr.net;"}))
 
 (def security-headers-self
   (merge base-security-headers
@@ -611,8 +599,8 @@
 
 (defn determine-language [req]
   (let [accept-language (get-in req [:headers "accept-language"] "")]
-    (cond (str/includes? accept-language "fr") :fr
-          :else                                :en)))
+    (cond (re-find #"(?i)\bfr\b" accept-language) :fr
+          :else                                    :en)))
 
 (defn handle-error [req e debug-info]
   (log/error "Error:" (str e))
@@ -665,7 +653,7 @@
                                    :text     (format body-text email confirm-url)
                                    :html     (format body-html email confirm-url)
                                    :host     smtp-host
-                                   :port     (Integer/parseInt (or smtp-port "587"))
+                                   :port     (Integer/parseInt (str (or smtp-port "587")))
                                    :username smtp-user
                                    :password smtp-pass})]
             (log/debug "Sending email result:" result)
@@ -744,42 +732,50 @@
 (defn parse-query-params [req]
   (let [query-params (:query-params req)
         uri-params   (when-let [query (:query-string req)]
-                       (when-let [token (last (re-matches #"^token=(.+)$" query))]
-                         {:token (java.net.URLDecoder/decode token "UTF-8")}))]
+                       (into {}
+                             (keep (fn [pair]
+                                     (when-not (str/blank? pair)
+                                       (let [[k v] (str/split pair #"=" 2)]
+                                         (when (and k v)
+                                           [(keyword (java.net.URLDecoder/decode k "UTF-8"))
+                                            (java.net.URLDecoder/decode v "UTF-8")])))))
+                             (str/split query #"&")))]
     (or query-params uri-params)))
 
 (defn process-subscription-action [lang action email]
-  (case action
-    "subscribe"
-    (let [result (handle-subscription-request email lang)]
-      (cond
-        (:already_subscribed result)
-        (make-response 200 "success" lang :already-subscribed email)
-        (:confirmation_pending result)
-        (make-response 200 "info" lang :confirmation-pending email)
-        (:confirmation_sent result)
-        (make-response 200 "info" lang :confirmation-sent email)
-        :else
+  (let [handler (case action
+                  "subscribe"   handle-subscription-request
+                  "unsubscribe" handle-unsubscribe-request
+                  nil)
+        result  (when handler (handler email lang))]
+    (cond
+      (nil? handler)
+      (make-response 400 "error" lang :operation-failed)
+
+      (:already_subscribed result)
+      (make-response 200 "success" lang :already-subscribed email)
+
+      (:not_subscribed result)
+      (make-response 200 "warning" lang :not-subscribed email)
+
+      (:confirmation_pending result)
+      (make-response 200 "info" lang :confirmation-pending email)
+
+      (:confirmation_sent result)
+      (make-response 200 "info" lang :confirmation-sent email)
+
+      :else
+      (let [error-key (if (= action "unsubscribe") :confirmation-email-failed :operation-failed)]
         {:status  400
          :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-         :body    (result-html lang "error" :operation-failed (:message result))}))
-    "unsubscribe"
-    (let [result (handle-unsubscribe-request email lang)]
-      (cond
-        (:not_subscribed result)
-        (make-response 200 "warning" lang :not-subscribed email)
-        (:confirmation_pending result)
-        (make-response 200 "info" lang :confirmation-pending email)
-        (:confirmation_sent result)
-        (make-response 200 "info" lang :confirmation-sent email)
-        :else
-        {:status  400
-         :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
-         :body    (result-html lang "error" :confirmation-email-failed (:message result))}))
-    (make-response 400 "error" lang :operation-failed)))
+         :body    (result-html lang "error" error-key (:message result))}))))
 
 (defn get-client-ip [req]
-  (or (get-in req [:headers "x-forwarded-for"])
+  (or (some-> (get-in req [:headers "x-forwarded-for"])
+              (str/split #",")
+              first
+              str/trim
+              not-empty)
       (get-in req [:headers "x-real-ip"])
       (:remote-addr req)
       "unknown-ip"))
@@ -795,29 +791,23 @@
      :body    (render-html strings lang :csrf-token csrf-token :show-form true)}))
 
 (defn rate-limited? [ip]
-  (let [now             (System/currentTimeMillis)
-        window-start    (- now rate-limit-window)
-        requests        (get @ip-request-log ip [])
-        recent-requests (filter #(>= % window-start) requests)]
-    ;; Prune old entries periodically
+  (let [now          (System/currentTimeMillis)
+        window-start (- now rate-limit-window)]
+    ;; Prune old entries periodically (once per window or when map gets large)
     (when (or (> (- now @last-pruned-time) rate-limit-window)
               (> (count @ip-request-log) 1000))
       (swap! ip-request-log
              (fn [log-map]
-               (reduce-kv (fn [m k v] (assoc m k (filter #(>= % window-start) v)))
-                          {} log-map)))
+               (into {} (keep (fn [[k v]]
+                                (let [v' (filterv #(>= % window-start) v)]
+                                  (when (seq v') [k v'])))
+                              log-map))))
       (reset! last-pruned-time now))
-    ;; Update the request log with the current timestamp
-    (swap! ip-request-log update ip #(conj (or % []) now))
-    ;; Prune old entries every 1000 IP requests
-    (when (> (count @ip-request-log) 1000)
-      (swap! ip-request-log
-             (fn [log-map]
-               (reduce-kv (fn [m k v]
-                            (assoc m k (filter #(>= % window-start) v)))
-                          {}
-                          log-map))))
-    (> (count recent-requests) max-requests-per-window)))
+    ;; Record the current request and check against limit
+    (let [updated (swap! ip-request-log update ip
+                         #(conj (filterv (fn [t] (>= t window-start)) (or % []))
+                                now))]
+      (> (count (get updated ip)) max-requests-per-window))))
 
 (defn handle-subscribe [req]
   (log/debug "Request method:" (:request-method req))
@@ -833,29 +823,29 @@
       (log/debug "Email from form:" email)
       (log/debug "Action from form:" action)
       (log/debug "CSRF token from form:" form-csrf-token)
-      (if-not email
+      (cond
+        (not email)
         (make-response 400 "error" lang :invalid-email "No email provided")
-        ;; CSRF Protection check - consume token to prevent replay attacks
-        (if-not (validate-csrf-token form-csrf-token client-ip :consume true)
-          (do
-            (log/warn "CSRF token validation failed")
+
+        (not (validate-csrf-token form-csrf-token client-ip :consume true))
+        (do (log/warn "CSRF token validation failed")
             (make-response 403 "error" lang :csrf-invalid))
-          ;; Anti-spam: rate limiting
-          (if (rate-limited? client-ip)
-            (do
-              (log/warn "Rate limit exceeded for IP:" client-ip)
-              (make-response 429 "error" lang :rate-limit))
-            ;; Anti-spam: honeypot check
-            (if (not (str/blank? (str (:website form-data))))
-              (do
-                (log/warn "Spam detected: honeypot field filled from IP:" client-ip)
-                (make-response 400 "error" lang :spam-detected))
-              ;; Email validation
-              (if (s/valid? ::subscription-form form-data)
-                (process-subscription-action lang action email)
-                (let [explain (s/explain-str ::subscription-form form-data)]
-                  (log/error "Invalid form submission:" explain)
-                  (make-response 400 "error" lang :invalid-email email))))))))
+
+        (rate-limited? client-ip)
+        (do (log/warn "Rate limit exceeded for IP:" client-ip)
+            (make-response 429 "error" lang :rate-limit))
+
+        (not (str/blank? (str (:website form-data))))
+        (do (log/warn "Spam detected: honeypot field filled from IP:" client-ip)
+            (make-response 400 "error" lang :spam-detected))
+
+        (not (s/valid? ::subscription-form form-data))
+        (let [explain (s/explain-str ::subscription-form form-data)]
+          (log/error "Invalid form submission:" explain)
+          (make-response 400 "error" lang :invalid-email email))
+
+        :else
+        (process-subscription-action lang action email)))
     (catch Throwable e
       (handle-error req e (str "Request method: " (name (:request-method req)) "\n"
                                "Headers: " (pr-str (:headers req)))))))
@@ -931,7 +921,7 @@
     (when-let [config-data (edn/read-string (slurp file-path))]
       (if-not (validate-config config-data)
         (do (log/error "Invalid configuration data")
-            (System/exit 0))
+            (System/exit 1))
         (do ;; Merge UI strings first to handle the nested structure
           (merge-ui-strings! config-data)
           ;; Handle path normalization for specific fields - FIXME: needed?
@@ -980,7 +970,7 @@
       (update-config-from-file! config-path))
     (when-not (config :mailgun-api-key)
       (log/error "MAILGUN_API_KEY not set")
-      (System/exit 0))
+      (System/exit 1))
     ;; Configure Timbre logging
     (let [appenders (merge {:println (log/println-appender {:stream :auto})}
                            (when-let [f (get opts :log-file)]
