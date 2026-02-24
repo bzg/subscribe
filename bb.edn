@@ -1,2 +1,2 @@
-{:src "src/bzg"
- :bbin/bin {subscribe {:main-opts ["-m" "subscribe"]}}}
+{:patsh ["src/bzg"]
+ :bbin/bin {subscribe {:main-opts ["-m" "bzg.subscribe"]}}}
