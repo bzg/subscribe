@@ -51,6 +51,7 @@
 ;; - subscribe-smtp-pass
 ;; - subscribe-smtp-from
 ;; - index-tpl
+;; - theme
 ;;
 ;; ~$ subscribe -h # Show more information
 
@@ -81,7 +82,8 @@
     :log-level {:alias :l :desc "Log level (debug, info, warn, error)" :default "info" :coerce :string}
     :config    {:alias :c :desc "Config file path" :coerce :string}
     :log-file  {:alias :L :desc "Log file" :coerce :string}
-    :index-tpl {:alias :I :desc "Index HTML template file path" :coerce :string}}))
+    :index-tpl {:alias :I :desc "Index HTML template file path" :coerce :string}
+    :theme     {:alias :t :desc "Pico CSS theme (doric, dsfr, lincoln, org, swh, teletype)" :coerce :string}}))
 
 (defn print-usage []
   (println "Usage: subscribe [options]")
@@ -107,6 +109,7 @@
   (println "  subscribe -b /app           # Set base path to /app")
   (println "  subscribe -u https://z.org  # Set confirmation URL")
   (println "  subscribe -I index.html     # Load index template from file")
+  (println "  subscribe -t doric          # Use the doric pico theme")
   (System/exit 0))
 
 ;; Setting defaults
@@ -115,6 +118,11 @@
 (def ip-request-log (atom {}))
 (def last-pruned-time (atom (System/currentTimeMillis)))
 (def token-store (atom {}))
+
+(def valid-themes #{"doric" "dsfr" "lincoln" "org" "swh" "teletype"})
+
+(defn theme-css-url [theme]
+  (str "https://cdn.jsdelivr.net/gh/bzg/pico-themes@latest/" theme ".css"))
 
 ;; Data validation
 (s/def ::email
@@ -141,7 +149,8 @@
                    ::mailgun-api-endpoint
                    ::base-path
                    ::base-url
-                   ::index-tpl]
+                   ::index-tpl
+                   ::theme]
           :opt [::smtp-config]))
 
 (s/def ::form-email ::email)
@@ -485,6 +494,7 @@
   <title>{{page.title}}{% if list-name|not-empty %} - {{list-name}}{% endif %}</title>
   <link rel=\"icon\" href=\"data:image/png;base64,iVBORw0KGgo=\">
   <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\">
+  {% if theme-css-url %}<link rel=\"stylesheet\" href=\"{{theme-css-url}}\">{% endif %}
   <style>
   .container {max-width: 800px; padding: 2rem 1rem; margin: 0 auto;}
   @media (max-width: 768px) {.container {width: 100%; padding: 1rem;}}
@@ -492,8 +502,6 @@
   .error {border-left: 5px solid var(--pico-color-red-550);}
   .warning {border-left: 5px solid var(--pico-color-yellow-550);}
   .info {border-left: 5px solid var(--pico-color-blue-550);}
-  button.primary {background-color: var(--pico-primary-background); color: var(--pico-primary-inverse);}
-  button.secondary {background-color: var(--pico-secondary-background); color: var(--pico-secondary-inverse);}
   .visually-hidden {position: absolute;left: -9999px; height: 1px; width: 1px; overflow: hidden;}
   .card {padding: 2rem; margin-bottom: 1rem;}
   .footer {text-align: center;font-size: .8rem;}
@@ -560,6 +568,7 @@
             :form           (:form strings)
             :base-path      (make-path "")
             :subscribe_path (make-path "subscribe")
+            :theme-css-url  (config :theme-css-url)
             :show-form      show-form}
      ;; Add message-related parameters if showing a message
      message (assoc :message-type message-type
@@ -940,6 +949,12 @@
           (when-let [index-file (:index-tpl config-data)]
             (when-let [index-content (slurp index-file)]
               (swap! app-config assoc :index-tpl index-content)))
+          ;; Process theme from config file
+          (when-let [theme (:theme config-data)]
+            (if (valid-themes theme)
+              (do (swap! app-config assoc :theme-css-url (theme-css-url theme))
+                  (log/info "Using pico theme from config:" theme))
+              (log/error "Invalid theme in config:" theme)))
           ;; Update logging configuration if log-file is specified
           (when-let [log-file (:log-file config-data)]
             (log/merge-config!
@@ -965,6 +980,13 @@
       (when-let [index-content (slurp index-file)]
         (swap! app-config assoc :index-tpl index-content)
         (log/info "Loaded index template from file:" index-file)))
+    ;; Process theme if provided via command line
+    (when-let [theme (:theme opts)]
+      (if (valid-themes theme)
+        (do (swap! app-config assoc :theme-css-url (theme-css-url theme))
+            (log/info "Using pico theme:" theme))
+        (do (log/error "Invalid theme:" theme ". Valid themes:" (str/join ", " (sort valid-themes)))
+            (System/exit 1))))
     ;; Process configuration file if provided (this overrides individual settings)
     (when-let [config-path (:config opts)]
       (update-config-from-file! config-path))
