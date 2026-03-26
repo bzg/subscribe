@@ -19,6 +19,88 @@ subscribe
 # Then check http://localhost:8080
 #+end_src
 
+* Configuration
+
+** Environment variables
+
+You need to set at least the Mailgun variables:
+
+#+begin_src sh
+export MAILGUN_API_KEY="xxxxxxxxxxxxxxxx-xxxxxxxx-xxxxxxxx"
+export MAILGUN_API_ENDPOINT="https://api.eu.mailgun.net/v3"
+export MAILGUN_LIST_ID="my@list.com"
+export MAILGUN_LIST_NAME="My Newsletter"
+#+end_src
+
+For double opt-in email sending:
+
+#+begin_src sh
+export SUBSCRIBE_SMTP_HOST="smtp.example.com"
+export SUBSCRIBE_SMTP_PORT="587"
+export SUBSCRIBE_SMTP_USER="user@example.com"
+export SUBSCRIBE_SMTP_PASS="yourpassword"
+export SUBSCRIBE_SMTP_FROM="newsletter@example.com"
+export SUBSCRIBE_BASE_URL="http://localhost"
+#+end_src
+
+You can also set a base path for subdirectory deployments:
+
+#+begin_src sh
+export SUBSCRIBE_BASE_PATH="/newsletter"
+#+end_src
+
+** Command line options
+
+| Option       | Alias | Description                                    |
+|--------------+-------+------------------------------------------------|
+| =--help=     | =-h=  | Display help                                   |
+| =--port=     | =-p=  | Port number (default: 8080)                    |
+| =--base-path= | =-b= | Base path for subdirectory deployments         |
+| =--base-url= | =-u=  | Base URL for confirmation links (no port)      |
+| =--log-level= | =-l= | Log level: debug, info, warn, error            |
+| =--log-file= | =-L=  | Log file path                                  |
+| =--config=   | =-c=  | EDN configuration file path                    |
+| =--index-tpl= | =-I= | Custom index HTML template file                |
+| =--theme=    | =-t=  | Pico CSS theme (see below)                     |
+
+** Themes
+
+=subscribe= uses [[https://picocss.com][Pico CSS v2]] and supports themes from
+[[https://github.com/bzg/pico-themes][pico-themes]]:
+
+| Theme        | Description            |
+|--------------+------------------------|
+| =doric=      | Monochromatic, minimal |
+| =dsfr=       | French gov design      |
+| =lincoln=    | Warm serif             |
+| =org=        | Org-mode inspired      |
+| =swh=        | Software Heritage      |
+| =teletype=   | Monospace, retro       |
+
+#+begin_src sh
+subscribe -t doric
+#+end_src
+
+You can also set it in a configuration file:
+
+#+begin_src clojure
+{:theme "swh"}
+#+end_src
+
+** Configuration file
+
+You can use an EDN file to set or override any option:
+
+#+begin_src sh
+subscribe -c config.edn
+#+end_src
+
+The configuration file supports these keys: =ui-strings=,
+=mailgun-api-endpoint=, =mailgun-api-key=, =mailgun-list-id=,
+=mailgun-list-name=, =base-url=, =base-path=, =subscribe-smtp-host=,
+=subscribe-smtp-port=, =subscribe-smtp-user=, =subscribe-smtp-pass=,
+=subscribe-smtp-from=, =index-tpl=, =theme=.
+
 * Feedback
 
 To get or provide feedback, send an email to *bzg@bzg.fr*.
