@@ -76,7 +76,7 @@
   (into
    (sorted-map)
    {:help      {:alias :h :desc "Display help"}
-    :port      {:alias :p :desc "Port number" :default 8080 :coerce :int}
+    :port      {:alias :p :desc "Port number" :coerce :int}
     :base-path {:alias :b :desc "Base path" :coerce :string}
     :base-url  {:alias :u :desc "Base URL for confirmation links (no port)" :coerce :string}
     :log-level {:alias :l :desc "Log level (debug, info, warn, error)" :default "info" :coerce :string}
@@ -135,6 +135,7 @@
 (s/def ::mailgun-list-name string?)
 (s/def ::mailgun-list-id (s/and string? #(not (re-find #"\s" %))))
 (s/def ::mailgun-api-endpoint (s/and string? #(not (re-find #"\s" %))))
+(s/def ::port pos-int?)
 (s/def ::base-path string?)
 (s/def ::index-tpl string?)
 (s/def ::smtp-config
@@ -147,6 +148,7 @@
                    ::mailgun-list-id
                    ::mailgun-list-name
                    ::mailgun-api-endpoint
+                   ::port
                    ::base-path
                    ::base-url
                    ::index-tpl
@@ -981,12 +983,8 @@
              {:appenders {:spit (log/spit-appender {:fname log-file})}})))))))
 
 (defn -main [& args]
-  (let [opts (cli/parse-opts args {:spec cli-options})
-        port (get opts :port 8080)]
+  (let [opts (cli/parse-opts args {:spec cli-options})]
     (when (:help opts) (print-usage))
-    ;; Update base-url with specified port when provided
-    (when-let [specified-port (get opts :port)]
-      (swap! app-config assoc :base-url (generate-default-base-url specified-port)))
     ;; Set base-url from command line if provided
     (when-let [conf-url (:base-url opts)]
       (swap! app-config assoc :base-url conf-url)
@@ -1010,19 +1008,23 @@
     ;; Process configuration file if provided (this overrides individual settings)
     (when-let [config-path (:config opts)]
       (update-config-from-file! config-path))
-    (when-not (config :mailgun-api-key)
-      (log/error "MAILGUN_API_KEY not set")
-      (System/exit 1))
-    ;; Configure Timbre logging
-    (let [appenders (merge {:println (log/println-appender {:stream :auto})}
-                           (when-let [f (get opts :log-file)]
-                             {:spit (log/spit-appender {:fname f})}))]
-      (log/merge-config!
-       {:min-level (keyword (get opts :log-level)) :appenders appenders}))
-    ;; Start the server
-    (log/info (str "Starting server on http://localhost:" port))
-    (log/info (str "Base path: " (if (str/blank? (config :base-path)) "[root]" (config :base-path))))
-    (server/run-server app {:port port})
+    ;; Resolve final port: CLI > config file > default
+    (let [port (or (:port opts) (:port @app-config) 8080)]
+      (when-not (:base-url opts)
+        (swap! app-config assoc :base-url (generate-default-base-url port)))
+      (when-not (config :mailgun-api-key)
+        (log/error "MAILGUN_API_KEY not set")
+        (System/exit 1))
+      ;; Configure Timbre logging
+      (let [appenders (merge {:println (log/println-appender {:stream :auto})}
+                             (when-let [f (get opts :log-file)]
+                               {:spit (log/spit-appender {:fname f})}))]
+        (log/merge-config!
+         {:min-level (keyword (get opts :log-level)) :appenders appenders}))
+      ;; Start the server
+      (log/info (str "Starting server on http://localhost:" port))
+      (log/info (str "Base path: " (if (str/blank? (config :base-path)) "[root]" (config :base-path))))
+      (server/run-server app {:port port}))
     ;; Keep the server running
     @(promise)))
 
