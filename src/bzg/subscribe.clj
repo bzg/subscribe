@@ -83,7 +83,7 @@
     :config    {:alias :c :desc "Config file path" :coerce :string}
     :log-file  {:alias :L :desc "Log file" :coerce :string}
     :index-tpl {:alias :I :desc "Index HTML template file path" :coerce :string}
-    :theme     {:alias :t :desc "Pico CSS theme (doric, dsfr, lincoln, org, swh, teletype)" :coerce :string}}))
+    :theme     {:alias :t :desc "CSS theme: URL, file:/// URL, local .css path, or pico-themes name" :coerce :string}}))
 
 (defn print-usage []
   (println "Usage: subscribe [options]")
@@ -119,10 +119,30 @@
 (def last-pruned-time (atom (System/currentTimeMillis)))
 (def token-store (atom {}))
 
-(def valid-themes #{"doric" "dsfr" "lincoln" "org" "swh" "teletype"})
+(defn- http-url? [s]
+  (or (str/starts-with? s "http://")
+      (str/starts-with? s "https://")))
 
-(defn theme-css-url [theme]
-  (str "https://cdn.jsdelivr.net/gh/bzg/pico-themes@latest/" theme ".css"))
+(defn resolve-css-theme
+  "Resolve a theme value to {:link url} or {:inline content}.
+  Priority: https:// URL, file:/// URL, local .css path, pico-themes name."
+  [css-theme]
+  (when css-theme
+    (cond
+      (http-url? css-theme)
+      {:link css-theme}
+      (str/starts-with? css-theme "file:///")
+      (let [path (subs css-theme 7)]
+        (if (.exists (java.io.File. path))
+          {:inline (slurp path)}
+          (do (log/warn "Theme file not found:" path) nil)))
+      (and (str/ends-with? css-theme ".css")
+           (.exists (java.io.File. css-theme)))
+      {:inline (slurp css-theme)}
+      (not (str/includes? css-theme " "))
+      {:link (str "https://cdn.jsdelivr.net/gh/bzg/pico-themes@latest/" css-theme ".css")}
+      :else
+      (do (log/warn "Unrecognized CSS theme value:" css-theme) nil))))
 
 ;; Data validation
 (s/def ::email
@@ -500,6 +520,7 @@
   <link rel=\"icon\" href=\"data:image/png;base64,iVBORw0KGgo=\">
   <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\">
   {% if theme-css-url %}<link rel=\"stylesheet\" href=\"{{theme-css-url}}\">{% endif %}
+  {% if theme-css-inline %}<style>{{theme-css-inline}}</style>{% endif %}
   <style>
   .container {max-width: 800px; padding: 2rem 1rem; margin: 0 auto;}
   @media (max-width: 768px) {.container {width: 100%; padding: 1rem;}}
@@ -573,7 +594,8 @@
             :form           (:form strings)
             :base-path      (make-path "")
             :subscribe_path (make-path "subscribe")
-            :theme-css-url  (config :theme-css-url)
+            :theme-css-url    (config :theme-css-url)
+            :theme-css-inline (config :theme-css-inline)
             :show-form      show-form}
      ;; Add message-related parameters if showing a message
      message (assoc :message-type message-type
@@ -957,7 +979,7 @@
           (merge-ui-strings! config-data)
           ;; Handle path normalization for specific fields - FIXME: needed?
           (let [processed-config
-                (cond-> (dissoc config-data :ui-strings)
+                (cond-> (dissoc config-data :ui-strings :theme)
                   (:base-path config-data)
                   (update :base-path normalize-path)
                   (:base-url config-data)
@@ -973,10 +995,12 @@
               (swap! app-config assoc :index-tpl index-content)))
           ;; Process theme from config file
           (when-let [theme (:theme config-data)]
-            (if (valid-themes theme)
-              (do (swap! app-config assoc :theme-css-url (theme-css-url theme))
-                  (log/info "Using pico theme from config:" theme))
-              (log/error "Invalid theme in config:" theme)))
+            (if-let [resolved (resolve-css-theme theme)]
+              (do (swap! app-config assoc
+                         :theme-css-url (:link resolved)
+                         :theme-css-inline (:inline resolved))
+                  (log/info "Using CSS theme from config:" theme))
+              (log/error "Could not resolve theme from config:" theme)))
           ;; Update logging configuration if log-file is specified
           (when-let [log-file (:log-file config-data)]
             (log/merge-config!
@@ -1000,10 +1024,12 @@
         (log/info "Loaded index template from file:" index-file)))
     ;; Process theme if provided via command line
     (when-let [theme (:theme opts)]
-      (if (valid-themes theme)
-        (do (swap! app-config assoc :theme-css-url (theme-css-url theme))
-            (log/info "Using pico theme:" theme))
-        (do (log/error "Invalid theme:" theme ". Valid themes:" (str/join ", " (sort valid-themes)))
+      (if-let [resolved (resolve-css-theme theme)]
+        (do (swap! app-config assoc
+                   :theme-css-url (:link resolved)
+                   :theme-css-inline (:inline resolved))
+            (log/info "Using CSS theme:" theme))
+        (do (log/error "Could not resolve theme:" theme)
             (System/exit 1))))
     ;; Process configuration file if provided (this overrides individual settings)
     (when-let [config-path (:config opts)]
