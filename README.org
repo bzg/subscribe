@@ -1,5 +1,7 @@
 #+title: Subscribe
 
+[[https://intver.org/][https://img.shields.io/badge/versioning-intver.org-blue.svg?style=for-the-badge]]
+
 Web application to manage Mailgun mailing list subscriptions.
 
 #+html: <img src="subscribe.webp" />
@@ -118,6 +120,14 @@ For detailed installation instructions:
 - [[https://clojure.org/guides/install_clojure][Install Clojure]]
 - [[https://github.com/babashka/babashka#installation][Install babashka]]
 - [[https://github.com/babashka/bbin#installation][Install bbin]]
+
+* Intentional Versioning
+
+This project uses [[https://intver.org][Intentional Versioning]], here are the three audiences:
+
+- =Users= : developers who deploy =subscribe=
+- =Integrators= : external packagers
+- =Maintainers= : maintainers of the codebase
 
 * Support the Clojure(script) ecosystem
 
