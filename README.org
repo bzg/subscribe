@@ -22,7 +22,6 @@ subscribe
 #+end_src
 
 * Configuration
-
 ** Environment variables
 
 You need to set at least the Mailgun variables:
@@ -63,29 +62,29 @@ export SUBSCRIBE_BASE_PATH="/newsletter"
 | =--log-file=  | =-L=    | Log file path                             |
 | =--config=    | =-c=    | EDN configuration file path               |
 | =--index-tpl= | =-I=    | Custom index HTML template file           |
-| =--theme=     | =-t=    | Pico CSS theme (see below)                |
+| =--theme=     | =-t=    | CSS theme (see below)                     |
 
 ** Themes
 
-=subscribe= uses [[https://picocss.com][Pico CSS v2]] and supports themes from [[https://github.com/bzg/pico-themes][pico-themes]]:
+=subscribe= uses [[https://picocss.com][Pico CSS v2]] and supports themes from [[https://github.com/bzg/pico-themes][pico-themes]].
 
-| Theme    | Description            |
-|----------+------------------------|
-| =doric=    | Monochromatic, minimal |
-| =dsfr=     | French gov design      |
-| =lincoln=  | Warm serif             |
-| =org=      | Org-mode inspired      |
-| =swh=      | Software Heritage      |
-| =teletype= | Monospace, retro       |
+The =--theme= option (or =:theme= in config) accepts:
+
+- A pico-themes name (e.g. =ashes=, =doric=, =swh=)
+- An =https://= URL to a remote CSS file
+- A =file:///= URL to a local CSS file
+- A local =.css= file path
 
 #+begin_src sh
 subscribe -t doric
+subscribe -t https://example.com/my-theme.css
+subscribe -t /path/to/theme.css
 #+end_src
 
 You can also set it in a configuration file:
 
 #+begin_src clojure
-{:theme "swh"}
+{:theme "ashes"}
 #+end_src
 
 ** Configuration file
