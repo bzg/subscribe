@@ -51,31 +51,30 @@ export SUBSCRIBE_BASE_PATH="/newsletter"
 
 ** Command line options
 
-| Option       | Alias | Description                                    |
-|--------------+-------+------------------------------------------------|
-| =--help=     | =-h=  | Display help                                   |
-| =--port=     | =-p=  | Port number (default: 8080)                    |
-| =--base-path= | =-b= | Base path for subdirectory deployments         |
-| =--base-url= | =-u=  | Base URL for confirmation links (no port)      |
-| =--log-level= | =-l= | Log level: debug, info, warn, error            |
-| =--log-file= | =-L=  | Log file path                                  |
-| =--config=   | =-c=  | EDN configuration file path                    |
-| =--index-tpl= | =-I= | Custom index HTML template file                |
-| =--theme=    | =-t=  | Pico CSS theme (see below)                     |
+| Option      | Alias | Description                               |
+|-------------+-------+-------------------------------------------|
+| =--help=      | =-h=    | Display help                              |
+| =--port=      | =-p=    | Port number (default: 8080)               |
+| =--base-path= | =-b=    | Base path for subdirectory deployments    |
+| =--base-url=  | =-u=    | Base URL for confirmation links (no port) |
+| =--log-level= | =-l=    | Log level: debug, info, warn, error       |
+| =--log-file=  | =-L=    | Log file path                             |
+| =--config=    | =-c=    | EDN configuration file path               |
+| =--index-tpl= | =-I=    | Custom index HTML template file           |
+| =--theme=     | =-t=    | Pico CSS theme (see below)                |
 
 ** Themes
 
-=subscribe= uses [[https://picocss.com][Pico CSS v2]] and supports themes from
-[[https://github.com/bzg/pico-themes][pico-themes]]:
+=subscribe= uses [[https://picocss.com][Pico CSS v2]] and supports themes from [[https://github.com/bzg/pico-themes][pico-themes]]:
 
-| Theme        | Description            |
-|--------------+------------------------|
-| =doric=      | Monochromatic, minimal |
-| =dsfr=       | French gov design      |
-| =lincoln=    | Warm serif             |
-| =org=        | Org-mode inspired      |
-| =swh=        | Software Heritage      |
-| =teletype=   | Monospace, retro       |
+| Theme    | Description            |
+|----------+------------------------|
+| =doric=    | Monochromatic, minimal |
+| =dsfr=     | French gov design      |
+| =lincoln=  | Warm serif             |
+| =org=      | Org-mode inspired      |
+| =swh=      | Software Heritage      |
+| =teletype= | Monospace, retro       |
 
 #+begin_src sh
 subscribe -t doric

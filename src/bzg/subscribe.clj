@@ -114,7 +114,7 @@
 
 ;; Setting defaults
 (def rate-limit-window (* 60 60 1000)) ;; 1 hour in milliseconds
-(def max-requests-per-window 10) ;; Maximum 10 requests per IP per hour
+(def max-requests-per-window 5) ;; Maximum 5 requests per IP per hour
 (def ip-request-log (atom {}))
 (def last-pruned-time (atom (System/currentTimeMillis)))
 (def token-store (atom {}))
@@ -179,7 +179,7 @@
              (into {} (filter (fn [[_ data]] (> (:expires-at data) now)) store))))))
 
 (defn create-token [token-type data]
-  (when (> (count @token-store) 10000)
+  (when (> (count @token-store) 500)
     (prune-expired-tokens))
   (let [token-key  (generate-token-key)
         now        (System/currentTimeMillis)
@@ -209,29 +209,32 @@
                  (< now (:expires-at token-data))))
           @token-store)))
 
-(defn get-or-create-csrf-token [ip]
+(defn get-or-create-csrf-token [ip session-id]
   (let [now (System/currentTimeMillis)
         existing-token (some (fn [[k data]]
                                (and (= (:type data) :csrf)
                                     (= (get-in data [:data :ip]) ip)
+                                    (= (get-in data [:data :session-id]) session-id)
                                     (> (:expires-at data) now)
                                     k))
                              @token-store)]
     (or existing-token
-        (create-token :csrf {:ip ip}))))
+        (create-token :csrf {:ip ip :session-id session-id}))))
 
 (defn validate-csrf-token
-  "Validate a CSRF token for the given IP address.
+  "Validate a CSRF token for the given IP address and session ID.
    Optionally consume (delete) the token after successful validation to prevent replay attacks."
-  [token-key ip & {:keys [consume] :or {consume false}}]
+  [token-key ip session-id & {:keys [consume] :or {consume false}}]
   (when (and (string? token-key)
              (not (str/blank? token-key))
-             (not (str/blank? ip)))
+             (not (str/blank? ip))
+             (not (str/blank? session-id)))
     (let [token-data (get @token-store token-key)
           now        (System/currentTimeMillis)
           valid?     (and token-data
                           (= (:type token-data) :csrf)
                           (= (get-in token-data [:data :ip]) ip)
+                          (= (get-in token-data [:data :session-id]) session-id)
                           (> (:expires-at token-data) now))]
       (when (and valid? consume)
         (swap! token-store dissoc token-key))
@@ -789,14 +792,30 @@
       (:remote-addr req)
       "unknown-ip"))
 
+(defn parse-cookies [req]
+  (when-let [cookie-header (get-in req [:headers "cookie"])]
+    (into {}
+          (for [pair (str/split cookie-header #";\s*")
+                :let [[k v] (str/split pair #"=" 2)]
+                :when (and k v)]
+            [(str/trim k) (str/trim v)]))))
+
+(defn get-session-id [req]
+  (or (get (parse-cookies req) "subscribe-session")
+      (generate-token-key)))
+
 (defn handle-index [req]
   (let [lang       (determine-language req)
         strings    (get-ui-strings lang)
         client-ip  (get-client-ip req)
-        csrf-token (get-or-create-csrf-token client-ip)]
-    (log/debug "Using CSRF token for IP" client-ip ":" csrf-token)
+        session-id (get-session-id req)
+        csrf-token (get-or-create-csrf-token client-ip session-id)]
+    (log/debug "Using CSRF token for IP" client-ip "session" session-id ":" csrf-token)
     {:status  200
-     :headers (merge {"Content-Type" "text/html; charset=UTF-8"} security-headers)
+     :headers (merge {"Content-Type" "text/html; charset=UTF-8"
+                      "Set-Cookie"   (str "subscribe-session=" session-id
+                                          "; Path=/; HttpOnly; SameSite=Strict; Max-Age=3600")}
+                     security-headers)
      :body    (render-html strings lang :csrf-token csrf-token :show-form true)}))
 
 (defn rate-limited? [ip]
@@ -804,7 +823,7 @@
         window-start (- now rate-limit-window)]
     ;; Prune old entries periodically (once per window or when map gets large)
     (when (or (> (- now @last-pruned-time) rate-limit-window)
-              (> (count @ip-request-log) 1000))
+              (> (count @ip-request-log) 200))
       (swap! ip-request-log
              (fn [log-map]
                (into {} (keep (fn [[k v]]
@@ -826,6 +845,7 @@
           email           (some-> (:email form-data) str/trim str/lower-case)
           action          (or (:action form-data) "subscribe")
           client-ip       (get-client-ip req)
+          session-id      (get (parse-cookies req) "subscribe-session")
           lang            (determine-language req)
           form-csrf-token (:csrf_token form-data)]
       (log/debug "Parsed form data:" (pr-str form-data))
@@ -836,7 +856,7 @@
         (not email)
         (make-response 400 "error" lang :invalid-email "No email provided")
 
-        (not (validate-csrf-token form-csrf-token client-ip :consume true))
+        (not (validate-csrf-token form-csrf-token client-ip session-id :consume true))
         (do (log/warn "CSRF token validation failed")
             (make-response 403 "error" lang :csrf-invalid))
 
