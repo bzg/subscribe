@@ -269,7 +269,8 @@
         (as-> p (if (str/starts-with? p "/") p (str "/" p)))
         (str/replace #"/$" ""))))
 
-(defn normalize-url [url] (str/replace url #"/$" "" ))
+(defn normalize-url [url]
+  (when url (str/replace url #"/$" "")))
 
 (defn join-paths
   "Join multiple path segments together with proper handling of slashes."
@@ -967,90 +968,84 @@
                          config-ui-strings)))
     (log/info "Merged UI strings from configuration file")))
 
+(defn apply-theme!
+  "Resolve a CSS theme and store it in app-config. Returns true on success,
+  false if the theme could not be resolved."
+  [theme source]
+  (if-let [resolved (resolve-css-theme theme)]
+    (do (swap! app-config assoc
+               :theme-css-url (:link resolved)
+               :theme-css-inline (:inline resolved))
+        (log/info (str "Using CSS theme from " source ":") theme)
+        true)
+    (do (log/error (str "Could not resolve theme from " source ":") theme)
+        false)))
+
+(defn load-index-tpl! [index-file]
+  (when-let [index-content (slurp index-file)]
+    (swap! app-config assoc :index-tpl index-content)
+    (log/info "Loaded index template from file:" index-file)))
+
 (defn update-config-from-file! [file-path]
   (when file-path
     (log/info "Using configuration file:" file-path)
     (when-let [config-data (edn/read-string (slurp file-path))]
-      (if-not (validate-config config-data)
-        (do (log/error "Invalid configuration data")
-            (System/exit 1))
-        (do ;; Merge UI strings first to handle the nested structure
-          (merge-ui-strings! config-data)
-          ;; Handle path normalization for specific fields - FIXME: needed?
-          (let [processed-config
-                (cond-> (dissoc config-data :ui-strings :theme)
-                  (:base-path config-data)
-                  (update :base-path normalize-path)
-                  (:base-url config-data)
-                  (update :base-url normalize-url))]
-            ;; Log what we're updating
-            (doseq [k (keys processed-config)]
-              (log/info "Updating config:" k))
-            ;; Update the config with the processed values
-            (swap! app-config merge processed-config))
-          ;; Load templates from files specified in config
-          (when-let [index-file (:index-tpl config-data)]
-            (when-let [index-content (slurp index-file)]
-              (swap! app-config assoc :index-tpl index-content)))
-          ;; Process theme from config file
-          (when-let [theme (:theme config-data)]
-            (if-let [resolved (resolve-css-theme theme)]
-              (do (swap! app-config assoc
-                         :theme-css-url (:link resolved)
-                         :theme-css-inline (:inline resolved))
-                  (log/info "Using CSS theme from config:" theme))
-              (log/error "Could not resolve theme from config:" theme)))
-          ;; Update logging configuration if log-file is specified
-          (when-let [log-file (:log-file config-data)]
-            (log/merge-config!
-             {:appenders {:spit (log/spit-appender {:fname log-file})}})))))))
+      (when-not (validate-config config-data)
+        (log/error "Invalid configuration data")
+        (System/exit 1))
+      (merge-ui-strings! config-data)
+      (let [processed-config (-> config-data
+                                 (dissoc :ui-strings :theme :index-tpl)
+                                 (cond-> (:base-path config-data)
+                                   (update :base-path normalize-path)
+                                   (:base-url config-data)
+                                   (update :base-url normalize-url)))]
+        (doseq [k (keys processed-config)]
+          (log/info "Updating config:" k))
+        (swap! app-config merge processed-config))
+      (when-let [index-file (:index-tpl config-data)]
+        (load-index-tpl! index-file))
+      (when-let [theme (:theme config-data)]
+        (apply-theme! theme "config")))))
+
+(defn- apply-cli-options! [opts]
+  (when-let [url (:base-url opts)]
+    (swap! app-config assoc :base-url url)
+    (log/info "Setting base-url from command line:" url))
+  (when-let [path (:base-path opts)]
+    (swap! app-config assoc :base-path (normalize-path path))
+    (log/info "Setting base-path from command line:" path))
+  (when-let [index-file (:index-tpl opts)]
+    (load-index-tpl! index-file))
+  (when-let [theme (:theme opts)]
+    (when-not (apply-theme! theme "command line")
+      (System/exit 1))))
+
+(defn- configure-logging! [opts]
+  (let [log-file  (or (:log-file opts) (:log-file @app-config))
+        appenders (cond-> {:println (log/println-appender {:stream :auto})}
+                    log-file (assoc :spit (log/spit-appender {:fname log-file})))]
+    (log/merge-config!
+     {:min-level (keyword (:log-level opts)) :appenders appenders})))
 
 (defn -main [& args]
   (let [opts (cli/parse-opts args {:spec cli-options})]
     (when (:help opts) (print-usage))
-    ;; Set base-url from command line if provided
-    (when-let [conf-url (:base-url opts)]
-      (swap! app-config assoc :base-url conf-url)
-      (log/info "Setting base-url from command line:" conf-url))
-    ;; Set base-path from command line if provided
-    (when-let [path (:base-path opts)]
-      (swap! app-config assoc :base-path (normalize-path path))
-      (log/info "Setting base-path from command line:" path))
-    ;; Process template files if provided via command line
-    (when-let [index-file (:index-tpl opts)]
-      (when-let [index-content (slurp index-file)]
-        (swap! app-config assoc :index-tpl index-content)
-        (log/info "Loaded index template from file:" index-file)))
-    ;; Process theme if provided via command line
-    (when-let [theme (:theme opts)]
-      (if-let [resolved (resolve-css-theme theme)]
-        (do (swap! app-config assoc
-                   :theme-css-url (:link resolved)
-                   :theme-css-inline (:inline resolved))
-            (log/info "Using CSS theme:" theme))
-        (do (log/error "Could not resolve theme:" theme)
-            (System/exit 1))))
-    ;; Process configuration file if provided (this overrides individual settings)
+    ;; Apply CLI options first; the config file (if any) may override them via merge
+    (apply-cli-options! opts)
     (when-let [config-path (:config opts)]
       (update-config-from-file! config-path))
     ;; Resolve final port: CLI > config file > default
     (let [port (or (:port opts) (:port @app-config) 8080)]
-      (when-not (or (:base-url opts) (:base-url @app-config))
+      (when-not (:base-url @app-config)
         (swap! app-config assoc :base-url (generate-default-base-url port)))
       (when-not (config :mailgun-api-key)
         (log/error "MAILGUN_API_KEY not set")
         (System/exit 1))
-      ;; Configure Timbre logging
-      (let [appenders (merge {:println (log/println-appender {:stream :auto})}
-                             (when-let [f (get opts :log-file)]
-                               {:spit (log/spit-appender {:fname f})}))]
-        (log/merge-config!
-         {:min-level (keyword (get opts :log-level)) :appenders appenders}))
-      ;; Start the server
+      (configure-logging! opts)
       (log/info (str "Starting server on http://localhost:" port))
       (log/info (str "Base path: " (if (str/blank? (config :base-path)) "[root]" (config :base-path))))
       (server/run-server app {:port port}))
-    ;; Keep the server running
     @(promise)))
 
 ;; Main entry point
