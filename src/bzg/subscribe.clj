@@ -283,9 +283,8 @@
       (str normalized-base path-part))))
 
 (defn generate-default-base-url [port]
-  (let [port-str     (str port)
-        default-base (or (System/getenv "SUBSCRIBE_BASE_URL")
-                         (str "http://localhost:" port-str))]
+  (let [default-base (or (System/getenv "SUBSCRIBE_BASE_URL")
+                         (str "http://localhost:" port))]
     (str (normalize-url default-base) "/")))
 
 (def ui-strings-data
@@ -1036,7 +1035,7 @@
       (update-config-from-file! config-path))
     ;; Resolve final port: CLI > config file > default
     (let [port (or (:port opts) (:port @app-config) 8080)]
-      (when-not (:base-url opts)
+      (when-not (or (:base-url opts) (:base-url @app-config))
         (swap! app-config assoc :base-url (generate-default-base-url port)))
       (when-not (config :mailgun-api-key)
         (log/error "MAILGUN_API_KEY not set")
