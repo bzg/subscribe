@@ -231,31 +231,30 @@
                  (< now (:expires-at token-data))))
           @token-store)))
 
-(defn get-or-create-csrf-token [ip session-id]
+(defn get-or-create-csrf-token [session-id]
   (let [now (System/currentTimeMillis)
         existing-token (some (fn [[k data]]
                                (and (= (:type data) :csrf)
-                                    (= (get-in data [:data :ip]) ip)
                                     (= (get-in data [:data :session-id]) session-id)
                                     (> (:expires-at data) now)
                                     k))
                              @token-store)]
     (or existing-token
-        (create-token :csrf {:ip ip :session-id session-id}))))
+        (create-token :csrf {:session-id session-id}))))
 
 (defn validate-csrf-token
-  "Validate a CSRF token for the given IP address and session ID.
-   Optionally consume (delete) the token after successful validation to prevent replay attacks."
-  [token-key ip session-id & {:keys [consume] :or {consume false}}]
+  "Validate a CSRF token for the given session ID.
+   Optionally consume (delete) the token after successful validation to prevent replay attacks.
+   The token is bound to the session cookie only (not the client IP), since a user's
+   IP can legitimately change between page load and submission (dual-stack, mobile/CGNAT)."
+  [token-key session-id & {:keys [consume] :or {consume false}}]
   (when (and (string? token-key)
              (not (str/blank? token-key))
-             (not (str/blank? ip))
              (not (str/blank? session-id)))
     (let [token-data (get @token-store token-key)
           now        (System/currentTimeMillis)
           valid?     (and token-data
                           (= (:type token-data) :csrf)
-                          (= (get-in token-data [:data :ip]) ip)
                           (= (get-in token-data [:data :session-id]) session-id)
                           (> (:expires-at token-data) now))]
       (when (and valid? consume)
@@ -831,10 +830,9 @@
 (defn handle-index [req]
   (let [lang       (determine-language req)
         strings    (get-ui-strings lang)
-        client-ip  (get-client-ip req)
         session-id (get-session-id req)
-        csrf-token (get-or-create-csrf-token client-ip session-id)]
-    (log/debug "Using CSRF token for IP" client-ip "session" session-id ":" csrf-token)
+        csrf-token (get-or-create-csrf-token session-id)]
+    (log/debug "Using CSRF token for session" session-id ":" csrf-token)
     {:status  200
      :headers (merge {"Content-Type" "text/html; charset=UTF-8"
                       "Set-Cookie"   (str "subscribe-session=" session-id
@@ -880,7 +878,7 @@
         (not email)
         (make-response 400 "error" lang :invalid-email "No email provided")
 
-        (not (validate-csrf-token form-csrf-token client-ip session-id :consume true))
+        (not (validate-csrf-token form-csrf-token session-id :consume true))
         (do (log/warn "CSRF token validation failed")
             (make-response 403 "error" lang :csrf-invalid))
 
