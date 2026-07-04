@@ -58,6 +58,7 @@
 (ns bzg.subscribe
   (:require [babashka.cli :as cli]
             [babashka.deps :as deps]
+            [babashka.process :as process]
             [babashka.http-client :as http]
             [babashka.pods :as pods]
             [clojure.edn :as edn]
@@ -76,6 +77,7 @@
   (into
    (sorted-map)
    {:help      {:alias :h :desc "Display help"}
+    :version   {:alias :v :desc "Show the subscribe version"}
     :port      {:alias :p :desc "Port number" :coerce :int}
     :base-path {:alias :b :desc "Base path" :coerce :string}
     :base-url  {:alias :u :desc "Base URL for confirmation links (no port)" :coerce :string}
@@ -1026,8 +1028,24 @@
     (log/merge-config!
      {:min-level (keyword (:log-level opts)) :appenders appenders})))
 
+(defn- bbin-version
+  "Version string read from bbin's install metadata (`bbin ls --edn`), or nil
+  when bbin is absent or subscribe was not installed through it."
+  []
+  (try
+    (let [{:keys [out exit]} (process/shell {:out :string :err :string :continue true}
+                                            "bbin" "ls" "--edn")]
+      (when (zero? exit)
+        (some (fn [e] (when (= 'io.github.bzg/subscribe (:lib e))
+                        (get-in e [:coords :git/tag])))
+              (vals (edn/read-string out)))))
+    (catch Exception _ nil)))
+
 (defn -main [& args]
   (let [opts (cli/parse-opts args {:spec cli-options})]
+    (when (:version opts)
+      (println (str "subscribe " (or (bbin-version) "(version unknown)")))
+      (System/exit 0))
     (when (:help opts) (print-usage))
     ;; Apply CLI options first; the config file (if any) may override them via merge
     (apply-cli-options! opts)
