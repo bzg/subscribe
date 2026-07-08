@@ -99,7 +99,41 @@ The configuration file supports these keys: =ui-strings=,
 =mailgun-api-endpoint=, =mailgun-api-key=, =mailgun-list-id=,
 =mailgun-list-name=, =base-url=, =base-path=, =subscribe-smtp-host=,
 =subscribe-smtp-port=, =subscribe-smtp-user=, =subscribe-smtp-pass=,
-=subscribe-smtp-from=, =index-tpl=, =theme=.
+=subscribe-smtp-from=, =index-tpl=, =theme=, =form-fields=.
+
+** Custom form fields
+
+You can ask subscribers to fill in extra fields with =form-fields= in
+the configuration file:
+
+#+begin_src clojure
+{:form-fields [{:name "name" :label "Your name" :required true}
+               {:name "organization" :label "Organization"
+                :placeholder "ACME Corp"}]}
+#+end_src
+
+Each field supports these keys:
+
+| Key         | Description                                        |
+|-------------+----------------------------------------------------|
+| =name=        | Field identifier (required, alphanumeric, =_= and =-=) |
+| =label=       | Label displayed above the input (defaults to =name=) |
+| =type=        | Input type: =text= (default), =number=, =url=, =tel=, =date= |
+| =required=    | Whether the field is mandatory (default: =false=)    |
+| =placeholder= | Placeholder text                                   |
+
+If you use a custom index template (=index-tpl=), it must render the
+fields itself with =form-fields= (see the default template in the source
+for the =for= loop to copy); otherwise the fields will not be displayed
+and required ones will block every subscription — subscribe logs a
+warning at startup in that case.
+
+Field values are only sent to Mailgun when the user confirms the
+subscription. A field named =name= maps to the Mailgun member =name=
+attribute; all other fields are stored as Mailgun member =vars=, which
+are created on the fly — nothing needs to be declared on the Mailgun
+side beforehand. You can then use them in your Mailgun templates, e.g.
+=%recipient.vars.organization%=.
 
 * Feedback
 

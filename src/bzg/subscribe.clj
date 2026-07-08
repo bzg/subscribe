@@ -52,6 +52,7 @@
 ;; - subscribe-smtp-from
 ;; - index-tpl
 ;; - theme
+;; - form-fields
 ;;
 ;; ~$ subscribe -h # Show more information
 
@@ -61,6 +62,7 @@
             [babashka.process :as process]
             [babashka.http-client :as http]
             [babashka.pods :as pods]
+            [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.spec.alpha :as s]
             [clojure.string :as str]
@@ -120,6 +122,7 @@
 (def ip-request-log (atom {}))
 (def last-pruned-time (atom (System/currentTimeMillis)))
 (def token-store (atom {}))
+(def max-field-value-length 500)
 
 (defn- http-url? [s]
   (or (str/starts-with? s "http://")
@@ -165,6 +168,24 @@
                 ::subscribe-smtp-user ::subscribe-smtp-pass
                 ::subscribe-smtp-from]))
 
+(def reserved-form-field-names
+  "Input names used by the built-in form; custom fields cannot reuse them."
+  #{"email" "csrf_token" "website" "action"})
+
+(s/def :form-field/name
+  (s/and string?
+         #(re-matches #"[a-zA-Z][a-zA-Z0-9_-]*" %)
+         #(not (contains? reserved-form-field-names %))))
+(s/def :form-field/label string?)
+(s/def :form-field/type #{"text" "number" "url" "tel" "date"})
+(s/def :form-field/required boolean?)
+(s/def :form-field/placeholder string?)
+(s/def ::form-fields
+  (s/and (s/coll-of (s/keys :req-un [:form-field/name]
+                            :opt-un [:form-field/label :form-field/type
+                                     :form-field/required :form-field/placeholder]))
+         #(or (empty? %) (apply distinct? (map :name %)))))
+
 (s/def ::config
   (s/keys :opt-un [::ui-strings
                    ::mailgun-list-id
@@ -174,7 +195,8 @@
                    ::base-path
                    ::base-url
                    ::index-tpl
-                   ::theme]
+                   ::theme
+                   ::form-fields]
           :opt [::smtp-config]))
 
 (s/def ::form-email ::email)
@@ -315,6 +337,8 @@
      :rate-limit-message                       "<p>Too many subscription attempts from your IP address.</p><p>Please try again later.</p>"
      :invalid-email                            "Invalid email format"
      :invalid-email-message                    "<p>The email <code>%s</code> appears to be invalid.</p><p>Please check the format and try again.<p>"
+     :missing-field                            "Missing required field"
+     :missing-field-message                    "<p>The field <code>%s</code> is required.</p><p>Please fill it in and try again.</p>"
      :spam-detected                            "Submission rejected"
      :spam-detected-message                    "Your submission has been identified as potential spam and has been rejected."
      :csrf-invalid                             "Security validation failed"
@@ -361,6 +385,8 @@
      :rate-limit-message                       "<p>Trop de tentatives d'abonnement depuis votre adresse IP.</p><p>Veuillez réessayer plus tard.</p>"
      :invalid-email                            "Format d'e-mail invalide"
      :invalid-email-message                    "<p>L'adresse e-mail <code>%s</code> semble être invalide.<p/><p>Veuillez vérifier le format et réessayer.</p>"
+     :missing-field                            "Champ obligatoire manquant"
+     :missing-field-message                    "<p>Le champ <code>%s</code> est obligatoire.</p><p>Veuillez le renseigner et réessayer.</p>"
      :spam-detected                            "Soumission rejetée"
      :spam-detected-message                    "Votre soumission a été identifiée comme spam potentiel et a été rejetée."
      :csrf-invalid                             "Échec de validation de sécurité"
@@ -403,6 +429,15 @@
 (defn get-ui-strings [& [lang]]
   (get (config :ui-strings) (or lang :en)))
 
+(defn normalized-form-fields
+  "Custom form fields from the configuration, with defaults applied."
+  []
+  (mapv (fn [{:keys [name label type] :as field}]
+          (assoc field
+                 :label (or (not-empty label) name)
+                 :type  (or type "text")))
+        (config :form-fields)))
+
 (defn make-path [& segments]
   (let [base-path       (config :base-path)
         normalized-base (normalize-path base-path)
@@ -412,10 +447,13 @@
       (= path-part "/")            normalized-base
       :else                        (join-paths normalized-base path-part))))
 
+(defn- url-encode [s]
+  (java.net.URLEncoder/encode (str s) "UTF-8"))
+
 (defn create-confirmation-url [token]
   (join-url (config :base-url)
             (normalize-path (config :base-path))
-            (str "confirm?token=" (java.net.URLEncoder/encode token "UTF-8"))))
+            (str "confirm?token=" (url-encode token))))
 
 ;; Returns Authorization header value for Mailgun API requests
 (def get-mailgun-auth-header
@@ -429,7 +467,7 @@
   (format "%s/lists/%s/members/%s"
           (config :mailgun-api-endpoint)
           (config :mailgun-list-id)
-          (java.net.URLEncoder/encode email "UTF-8")))
+          (url-encode email)))
 
 (defn make-mailgun-request [method url body-params]
   (let [auth-header  (get-mailgun-auth-header (config :mailgun-api-key))
@@ -454,7 +492,18 @@
     (when (zero? (mod new-count 10))
       (log/info (format "%d new subscriptions" new-count)))))
 
-(defn manage-mailgun-subscription [action email]
+(defn make-subscribe-body
+  "Build the form-urlencoded body for a Mailgun member subscription.
+  A custom field named \"name\" maps to Mailgun's first-class name
+  parameter; other fields are sent in the vars JSON dictionary."
+  [email vars]
+  (str (format "address=%s&subscribed=yes&upsert=yes" (url-encode email))
+       (when-let [member-name (get vars "name")]
+         (str "&name=" (url-encode member-name)))
+       (when-let [extra-vars (not-empty (dissoc vars "name"))]
+         (str "&vars=" (url-encode (json/generate-string extra-vars))))))
+
+(defn manage-mailgun-subscription [action email vars]
   (log/info (if (= action :subscribe) "Subscribing" "Unsubscribing") "email:" email)
   (let [[method url body-params]
         (case action
@@ -462,8 +511,7 @@
                         (format "%s/lists/%s/members"
                                 (config :mailgun-api-endpoint)
                                 (config :mailgun-list-id))
-                        (format "address=%s&subscribed=yes&upsert=yes"
-                                (java.net.URLEncoder/encode email "UTF-8"))]
+                        (make-subscribe-body email vars)]
           :unsubscribe [:delete (get-mailgun-member-url email) nil])
         _        (log/debug "Making" (name method) "request to Mailgun API:" url (when body-params body-params))
         response (make-mailgun-request method url body-params)]
@@ -502,9 +550,10 @@
   ;; where two simultaneous requests could both pass validation
   (if-let [token-data (validate-token token-key :consume true)]
     (let [action (:type token-data)
-          email  (get-in token-data [:data :email])]
+          email  (get-in token-data [:data :email])
+          vars   (get-in token-data [:data :vars])]
       (if (#{:subscribe :unsubscribe} action)
-        (assoc (manage-mailgun-subscription action email)
+        (assoc (manage-mailgun-subscription action email vars)
                :email email
                :action action
                :confirm-type (keyword (str (name action) "-confirmation-success")))
@@ -556,6 +605,10 @@
         <p>{{page.subheading}}</p>
         <form action=\"{{subscribe_path}}\" method=\"post\">
           <input type=\"email\" id=\"email\" name=\"email\" placeholder=\"{{form.email-placeholder}}\" required>
+          {% for field in form-fields %}
+          <label for=\"field-{{field.name}}\">{{field.label}}</label>
+          <input type=\"{{field.type}}\" id=\"field-{{field.name}}\" name=\"{{field.name}}\" maxlength=\"{{max-field-length}}\"{% if field.placeholder %} placeholder=\"{{field.placeholder}}\"{% endif %}{% if field.required %} required{% endif %}>
+          {% endfor %}
           <input type=\"hidden\" name=\"csrf_token\" value=\"{{csrf_token}}\">
           <div class=\"visually-hidden\">
             <label for=\"website\">{{form.website-label}}</label>
@@ -563,7 +616,8 @@
           </div>
           <div class=\"grid\">
             <button type=\"submit\" name=\"action\" value=\"subscribe\" class=\"primary\">{{form.subscribe-button}}</button>
-            <button type=\"submit\" name=\"action\" value=\"unsubscribe\" class=\"secondary\">{{form.unsubscribe-button}}</button>
+            {% comment %} formnovalidate: users unsubscribing must not be forced to fill required custom fields; it also skips the browser email check, which the server enforces anyway {% endcomment %}
+            <button type=\"submit\" name=\"action\" value=\"unsubscribe\" class=\"secondary\"{% if form-fields|not-empty %} formnovalidate{% endif %}>{{form.unsubscribe-button}}</button>
           </div>
         </form>
       </div>
@@ -593,6 +647,8 @@
             :page           (:page strings)
             :messages       (:messages strings)
             :form           (:form strings)
+            :form-fields    (normalized-form-fields)
+            :max-field-length max-field-value-length
             :base-path      (make-path "")
             :subscribe_path (make-path "subscribe")
             :theme-css-url    (config :theme-css-url)
@@ -707,7 +763,25 @@
         {:success false
          :message (.getMessage e)}))))
 
-(defn handle-subscription-request [email lang]
+(defn extract-form-fields
+  "Collect custom form field values from parsed form data.
+  Fields are expected to be normalized (see normalized-form-fields).
+  Returns {:ok vars} mapping field names to trimmed values, or
+  {:error label} when a required field is left blank."
+  [fields form-data]
+  (reduce (fn [acc {:keys [name label required]}]
+            (let [value (some-> (get form-data (keyword name)) str/trim not-empty)]
+              (cond
+                value    (assoc-in acc [:ok name]
+                                   (if (> (count value) max-field-value-length)
+                                     (subs value 0 max-field-value-length)
+                                     value))
+                required (reduced {:error label})
+                :else    acc)))
+          {:ok {}}
+          fields))
+
+(defn handle-subscription-request [email lang vars]
   (log/info "Handling subscription request for:" email)
   (cond
     (check-if-subscribed email)
@@ -715,7 +789,7 @@
     (has-pending-confirmation? email :subscribe)
     {:confirmation_pending true}
     :else
-    (let [token  (create-token :subscribe {:email email})
+    (let [token  (create-token :subscribe {:email email :vars vars})
           result (send-confirmation-email
                   {:email  email
                    :token  token
@@ -725,7 +799,7 @@
         {:confirmation_sent true}
         {:message (:message result)}))))
 
-(defn handle-unsubscribe-request [email lang]
+(defn handle-unsubscribe-request [email lang _vars]
   (log/info "Handling unsubscribe request for:" email)
   (cond
     (not (check-if-subscribed email))
@@ -779,12 +853,12 @@
                              (str/split query #"&")))]
     (or query-params uri-params)))
 
-(defn process-subscription-action [lang action email]
+(defn process-subscription-action [lang action email vars]
   (let [handler (case action
                   "subscribe"   handle-subscription-request
                   "unsubscribe" handle-unsubscribe-request
                   nil)
-        result  (when handler (handler email lang))]
+        result  (when handler (handler email lang vars))]
     (cond
       (nil? handler)
       (make-response 400 "error" lang :operation-failed)
@@ -898,7 +972,12 @@
           (make-response 400 "error" lang :invalid-email email))
 
         :else
-        (process-subscription-action lang action email)))
+        (let [custom-fields (when (= action "subscribe")
+                              (extract-form-fields (normalized-form-fields) form-data))]
+          (if-let [missing (:error custom-fields)]
+            (make-response 400 "error" lang :missing-field missing)
+            (process-subscription-action lang action email
+                                         (not-empty (:ok custom-fields)))))))
     (catch Throwable e
       (handle-error req e (str "Request method: " (name (:request-method req)) "\n"
                                "Headers: " (pr-str (:headers req)))))))
@@ -1059,6 +1138,12 @@
         (log/error "MAILGUN_API_KEY not set")
         (System/exit 1))
       (configure-logging! opts)
+      (when (and (config :index-tpl)
+                 (seq (config :form-fields))
+                 (not (str/includes? (config :index-tpl) "form-fields")))
+        (log/warn (str "Custom index template does not use form-fields: "
+                       "configured custom fields will not be rendered, "
+                       "and required ones will block subscriptions")))
       (log/info (str "Starting server on http://localhost:" port))
       (log/info (str "Base path: " (if (str/blank? (config :base-path)) "[root]" (config :base-path))))
       (server/run-server app {:port port}))
